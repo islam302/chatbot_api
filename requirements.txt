@@ -16,13 +16,14 @@ gunicorn>=23.0,<24.0
 # Database (PostgreSQL — optional if using SQLite)
 psycopg2-binary>=2.9,<3.0
 
-# RAG / chat (optional — only required for the /api/v1/chat/ endpoint)
+# Vector math (in-DB JSON embeddings + numpy cosine)
+numpy>=1.26,<3.0
+
+# LLM providers (install only what you use)
 openai>=1.40,<2.0
-langchain>=0.3,<0.4
-langchain-community>=0.3,<0.4
-langchain-openai>=0.3,<0.4
-faiss-cpu>=1.8,<2.0
-tiktoken>=0.7,<1.0
+anthropic>=0.39,<1.0
+
+# Document parsing
 docx2txt>=0.9,<1.0
 
 # Excel import

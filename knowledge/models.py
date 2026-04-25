@@ -17,7 +17,21 @@ class TimestampedModel(models.Model):
         abstract = True
 
 
-class FixedQuestion(TimestampedModel):
+class EmbeddingMixin(models.Model):
+    """Stores a vector embedding plus the model that produced it.
+
+    Stored as JSON for portability — works on SQLite today and is trivially
+    swappable for pgvector later (see services/retrieval.py).
+    """
+
+    embedding = models.JSONField(null=True, blank=True)
+    embedding_model = models.CharField(max_length=64, blank=True, default="")
+
+    class Meta:
+        abstract = True
+
+
+class FixedQuestion(TimestampedModel, EmbeddingMixin):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     question = models.TextField(max_length=512)
     answer = models.TextField(max_length=4096)
@@ -43,7 +57,7 @@ class FixedQuestion(TimestampedModel):
         return self.question[:50]
 
 
-class QuestionAnswer(TimestampedModel):
+class QuestionAnswer(TimestampedModel, EmbeddingMixin):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     question = models.TextField(max_length=512)
     answer = models.TextField(max_length=4096)
@@ -215,3 +229,68 @@ class UploadedDocument(TimestampedModel):
     @property
     def file_size_mb(self):
         return round(self.file_size / (1024 * 1024), 2) if self.file_size else 0
+
+
+class DocumentChunk(TimestampedModel, EmbeddingMixin):
+    """A persisted chunk of a parsed document, ready for retrieval."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    document = models.ForeignKey(
+        UploadedDocument, on_delete=models.CASCADE, related_name="chunks"
+    )
+    position = models.PositiveIntegerField(default=0)
+    content = models.TextField()
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["document_id", "position"]
+        indexes = [models.Index(fields=["document", "position"])]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["document", "position"], name="unique_chunk_position"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.document_id}#{self.position}"
+
+
+class FeedbackRating(models.TextChoices):
+    UP = "up", "Helpful"
+    DOWN = "down", "Not helpful"
+
+
+class AnswerSource(models.TextChoices):
+    QA_BANK = "qa_bank", "Q&A bank"
+    RAG = "rag", "RAG"
+    FALLBACK = "fallback", "Fallback"
+
+
+class ChatFeedback(TimestampedModel):
+    """User feedback on a chat answer — feeds quality monitoring + retraining."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    question = models.TextField()
+    answer = models.TextField()
+    source = models.CharField(
+        max_length=16,
+        choices=AnswerSource.choices,
+        default=AnswerSource.RAG,
+    )
+    source_id = models.CharField(max_length=64, blank=True, default="")
+    rating = models.CharField(max_length=8, choices=FeedbackRating.choices)
+    comment = models.TextField(blank=True, default="")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="chat_feedback",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["rating", "source"])]
+
+    def __str__(self):
+        return f"{self.rating} {self.question[:40]}"

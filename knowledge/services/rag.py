@@ -1,216 +1,164 @@
-"""RAG (Retrieval Augmented Generation) service.
+"""High-level "answer a question" pipeline.
 
-Builds a FAISS vector store from the active uploaded documents and answers
-questions against it using OpenAI chat models. The vector store is cached in
-memory and only rebuilt when the set of active documents changes.
+Order of operations (all configurable):
 
-The OpenAI dependency is imported lazily so the rest of the API remains
-usable even when the OpenAI/LangChain stack is not installed.
+1. **Q&A bank** — semantic match against ``FixedQuestion`` and ``QuestionAnswer``.
+   If the top hit is above ``QA_BANK_THRESHOLD``, return the curated answer
+   directly. This is the single highest-quality signal: it's an answer
+   you've already vetted.
+
+2. **RAG over documents** — semantic search over ``DocumentChunk`` rows.
+   The top chunks are stitched into a context window and passed to the
+   configured LLM with a strict "answer only from context" system prompt.
+
+3. **Fallback** — if neither produces a confident result, return a polite
+   "I don't know" response and record the question as ``UnansweredQuestion``
+   so it can be triaged later.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import threading
 from dataclasses import dataclass, field
 from typing import Iterable
 
-from django.conf import settings
-
-from ..models import UploadedDocument
+from ..models import UnansweredQuestion
+from .llm import LLMError, get_backend
+from .retrieval import ChunkHit, QAHit, search_chunks, search_qa_bank
 
 logger = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = """You are a smart assistant. Answer using only the provided context.
-- For questions in the context, answer using only that information.
-- For questions outside the context, reply: "Sorry, your question is outside my scope. Please rephrase or stay within the topic."
-- Always answer in the language of the question.
-- When sharing URLs, use plain markdown links.
+SYSTEM_PROMPT = """You are a careful assistant grounded in the provided context.
+
+Rules:
+- Answer ONLY using information from the "Context" section.
+- If the answer is not in the context, reply that you do not have enough information and suggest the user contact a human.
+- Quote URLs and identifiers verbatim.
+- Reply in the same language as the question.
+- Keep answers concise and structured.
 """
 
 
 class RagUnavailable(RuntimeError):
-    """Raised when the RAG stack cannot be initialised (missing deps or key)."""
+    """Raised when the answer pipeline cannot run (missing key, missing deps)."""
 
 
 @dataclass
-class RagAnswer:
+class AnswerResult:
     answer: str
+    source: str  # "qa_bank" | "rag" | "fallback"
+    source_id: str = ""
     sources: list[dict] = field(default_factory=list)
+    qa_hits: list[QAHit] = field(default_factory=list)
+    chunk_hits: list[ChunkHit] = field(default_factory=list)
+    confident: bool = True
 
 
-class RagService:
-    """Singleton-style service maintaining a FAISS index over active documents."""
+def answer_question(
+    question: str,
+    *,
+    history: Iterable[dict] | None = None,
+    qa_threshold: float | None = None,
+    rag_threshold: float | None = None,
+    log_unanswered: bool = True,
+) -> AnswerResult:
+    qa_threshold = (
+        qa_threshold
+        if qa_threshold is not None
+        else float(os.getenv("QA_BANK_THRESHOLD", "0.82"))
+    )
+    rag_threshold = (
+        rag_threshold
+        if rag_threshold is not None
+        else float(os.getenv("RAG_SIMILARITY_THRESHOLD", "0.45"))
+    )
 
-    _instance: "RagService | None" = None
-    _lock = threading.Lock()
+    # 1) Q&A bank
+    try:
+        qa_hits = search_qa_bank(question, top_k=3, threshold=qa_threshold)
+    except Exception:
+        logger.exception("Q&A bank search failed; continuing with RAG")
+        qa_hits = []
 
-    def __init__(self):
-        self._vectorstore = None
-        self._documents_signature: tuple | None = None
-        self._embeddings = None
-        self._llm = None
-
-    @classmethod
-    def instance(cls) -> "RagService":
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = cls()
-        return cls._instance
-
-    def invalidate(self):
-        """Force the index to rebuild on the next request."""
-        with self._lock:
-            self._vectorstore = None
-            self._documents_signature = None
-
-    def answer(self, question: str, history: Iterable[dict] | None = None) -> RagAnswer:
-        history = list(history or [])
-        self._ensure_index()
-
-        if self._vectorstore is None:
-            raise RagUnavailable("No active documents are available for retrieval.")
-
-        results = self._vectorstore.similarity_search_with_score(question, k=8)
-        threshold = float(getattr(settings, "RAG_SIMILARITY_THRESHOLD", 0.5))
-        relevant = [(doc, score) for doc, score in results if score >= threshold]
-
-        if not relevant:
-            return RagAnswer(
-                answer="Sorry, your question is outside the scope of the available documents."
-            )
-
-        context = "\n\n".join(doc.page_content for doc, _ in relevant)
-        history_text = self._render_history(history)
-
-        prompt = (
-            f"{SYSTEM_PROMPT}\n\n"
-            f"Conversation history:\n{history_text}\n\n"
-            f"Available context:\n{context}\n\n"
-            f"Current question:\n{question}\n"
+    if qa_hits:
+        top = qa_hits[0]
+        return AnswerResult(
+            answer=top.answer,
+            source="qa_bank",
+            source_id=top.id,
+            sources=[
+                {"type": h.source, "id": h.id, "question": h.question, "score": h.score}
+                for h in qa_hits
+            ],
+            qa_hits=qa_hits,
         )
 
-        response = self._llm.invoke(prompt)
-        sources = [
+    # 2) RAG over document chunks
+    try:
+        chunks = search_chunks(question, top_k=6, threshold=rag_threshold)
+    except Exception as exc:
+        logger.exception("Chunk search failed")
+        raise RagUnavailable(str(exc)) from exc
+
+    if not chunks:
+        return _fallback(question, log_unanswered=log_unanswered)
+
+    context = "\n\n---\n\n".join(
+        f"[Source: {hit.filename}#{hit.position}]\n{hit.content}" for hit in chunks
+    )
+    history_text = _render_history(list(history or []))
+
+    user_prompt = (
+        f"Conversation so far:\n{history_text or '(none)'}\n\n"
+        f"Context:\n{context}\n\n"
+        f"Question: {question}"
+    )
+
+    try:
+        llm = get_backend()
+        answer_text = llm.complete(SYSTEM_PROMPT, user_prompt)
+    except LLMError as exc:
+        raise RagUnavailable(str(exc)) from exc
+
+    return AnswerResult(
+        answer=answer_text,
+        source="rag",
+        sources=[
             {
-                "filename": doc.metadata.get("source"),
-                "document_id": doc.metadata.get("doc_id"),
-                "score": float(score),
+                "filename": hit.filename,
+                "document_id": hit.document_id,
+                "chunk_id": hit.chunk_id,
+                "position": hit.position,
+                "score": hit.score,
             }
-            for doc, score in relevant
-        ]
-        return RagAnswer(answer=response.content, sources=sources)
+            for hit in chunks
+        ],
+        chunk_hits=chunks,
+    )
 
-    def _ensure_index(self):
-        signature = self._compute_signature()
-        if self._vectorstore is not None and self._documents_signature == signature:
-            return
 
-        with self._lock:
-            signature = self._compute_signature()
-            if self._vectorstore is not None and self._documents_signature == signature:
-                return
+def _fallback(question: str, *, log_unanswered: bool) -> AnswerResult:
+    if log_unanswered:
+        UnansweredQuestion.objects.get_or_create(question=question)
+    return AnswerResult(
+        answer=(
+            "I don't have enough information to answer that yet. "
+            "I've logged the question so it can be reviewed."
+        ),
+        source="fallback",
+        confident=False,
+    )
 
-            documents = self._load_documents()
-            if not documents:
-                self._vectorstore = None
-                self._documents_signature = None
-                return
 
-            embeddings = self._get_embeddings()
-            from langchain_community.vectorstores import FAISS  # type: ignore
-
-            self._vectorstore = FAISS.from_documents(documents, embeddings)
-            self._documents_signature = signature
-            self._get_llm()
-
-    def _compute_signature(self) -> tuple:
-        ids = (
-            UploadedDocument.objects.filter(
-                is_active=True, processing_status="completed"
-            )
-            .order_by("created_at")
-            .values_list("id", "updated_at")
-        )
-        return tuple((str(i), ts.isoformat()) for i, ts in ids)
-
-    def _load_documents(self):
-        try:
-            from langchain.text_splitter import RecursiveCharacterTextSplitter  # type: ignore
-            import docx2txt  # type: ignore
-        except ImportError as exc:
-            raise RagUnavailable(
-                "RAG dependencies are not installed (langchain, docx2txt)."
-            ) from exc
-
-        splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=200)
-        out = []
-        active = UploadedDocument.objects.filter(
-            is_active=True, processing_status="completed"
-        )
-        for doc in active:
-            try:
-                path = doc.file.path
-                if not os.path.exists(path):
-                    logger.warning("Document file missing on disk: %s", path)
-                    continue
-                text = docx2txt.process(path)
-                chunks = splitter.create_documents(
-                    [text],
-                    metadatas=[{"source": doc.filename, "doc_id": str(doc.id)}],
-                )
-                out.extend(chunks)
-            except Exception:
-                logger.exception("Failed to load document %s", doc.id)
-        return out
-
-    def _get_embeddings(self):
-        if self._embeddings is not None:
-            return self._embeddings
-        try:
-            from langchain_openai import OpenAIEmbeddings  # type: ignore
-        except ImportError as exc:
-            raise RagUnavailable("langchain-openai not installed.") from exc
-
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise RagUnavailable("OPENAI_API_KEY is not configured.")
-
-        self._embeddings = OpenAIEmbeddings(
-            openai_api_key=api_key, model="text-embedding-3-small"
-        )
-        return self._embeddings
-
-    def _get_llm(self):
-        if self._llm is not None:
-            return self._llm
-        try:
-            from langchain_openai import ChatOpenAI  # type: ignore
-        except ImportError as exc:
-            raise RagUnavailable("langchain-openai not installed.") from exc
-
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise RagUnavailable("OPENAI_API_KEY is not configured.")
-
-        self._llm = ChatOpenAI(
-            model_name=os.getenv("RAG_MODEL", "gpt-4o"),
-            temperature=0,
-            openai_api_key=api_key,
-        )
-        return self._llm
-
-    @staticmethod
-    def _render_history(history: list[dict]) -> str:
-        out = []
-        for msg in history:
-            role = msg.get("role", "user")
-            content = (msg.get("content") or "").strip()
-            if not content:
-                continue
-            label = "User" if role == "user" else "Assistant"
-            out.append(f"{label}: {content}")
-        return "\n".join(out)
+def _render_history(history: list[dict]) -> str:
+    out: list[str] = []
+    for msg in history:
+        role = msg.get("role", "user")
+        content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+        label = "User" if role == "user" else "Assistant"
+        out.append(f"{label}: {content}")
+    return "\n".join(out)

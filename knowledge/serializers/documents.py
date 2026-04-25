@@ -5,6 +5,7 @@ from ..models import UploadedDocument
 
 class UploadedDocumentSerializer(serializers.ModelSerializer):
     file_size_mb = serializers.FloatField(read_only=True)
+    chunk_count = serializers.IntegerField(source="chunks.count", read_only=True)
     uploaded_by_username = serializers.CharField(
         source="uploaded_by.username", read_only=True
     )
@@ -17,6 +18,7 @@ class UploadedDocumentSerializer(serializers.ModelSerializer):
             "filename",
             "file_size",
             "file_size_mb",
+            "chunk_count",
             "processing_status",
             "error_message",
             "is_active",
@@ -25,6 +27,7 @@ class UploadedDocumentSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
         read_only_fields = [
             "id",
             "filename",

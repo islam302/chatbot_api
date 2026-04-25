@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from ..models import AnswerSource, ChatFeedback
+
 
 class ChatMessageSerializer(serializers.Serializer):
     role = serializers.ChoiceField(choices=["user", "assistant", "system"])
@@ -9,23 +11,16 @@ class ChatMessageSerializer(serializers.Serializer):
 class ChatRequestSerializer(serializers.Serializer):
     question = serializers.CharField(max_length=2000)
     history = ChatMessageSerializer(many=True, required=False, default=list)
-    chat_type = serializers.ChoiceField(
-        choices=["rag", "questions"], default="rag"
-    )
     language = serializers.CharField(max_length=8, default="ar")
-
-
-class ChatSourceSerializer(serializers.Serializer):
-    document_id = serializers.UUIDField(required=False)
-    filename = serializers.CharField(required=False)
-    score = serializers.FloatField(required=False)
 
 
 class ChatResponseSerializer(serializers.Serializer):
     answer = serializers.CharField()
-    sources = ChatSourceSerializer(many=True, required=False)
+    source = serializers.ChoiceField(choices=AnswerSource.choices)
+    source_id = serializers.CharField(allow_blank=True, required=False)
+    sources = serializers.ListField(child=serializers.DictField(), required=False)
+    confident = serializers.BooleanField(default=True)
     response_time_ms = serializers.IntegerField(required=False)
-    chat_type = serializers.CharField(required=False)
 
 
 class QuestionSearchSerializer(serializers.Serializer):
@@ -49,6 +44,25 @@ class AnalyticsSerializer(serializers.Serializer):
     total_dynamic_questions = serializers.IntegerField()
     total_unanswered = serializers.IntegerField()
     total_documents = serializers.IntegerField()
+    total_chunks = serializers.IntegerField()
     most_asked_questions = serializers.ListField(child=serializers.DictField())
     language_distribution = serializers.DictField(child=serializers.IntegerField())
     unanswered_by_status = serializers.DictField(child=serializers.IntegerField())
+    feedback_summary = serializers.DictField(child=serializers.IntegerField())
+
+
+class ChatFeedbackSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ChatFeedback
+        fields = [
+            "id",
+            "question",
+            "answer",
+            "source",
+            "source_id",
+            "rating",
+            "comment",
+            "user",
+            "created_at",
+        ]
+        read_only_fields = ["id", "user", "created_at"]

@@ -5,6 +5,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ..models import (
+    ChatFeedback,
+    DocumentChunk,
     FixedQuestion,
     QuestionAnswer,
     SimpleQuestionTree,
@@ -37,13 +39,21 @@ class AnalyticsAPIView(APIView):
             .values_list("status", "c")
         )
 
+        feedback_summary = dict(
+            ChatFeedback.objects.values_list("rating")
+            .annotate(c=Count("id"))
+            .values_list("rating", "c")
+        )
+
         payload = {
             "total_fixed_questions": FixedQuestion.objects.count(),
             "total_dynamic_questions": QuestionAnswer.objects.count(),
             "total_unanswered": UnansweredQuestion.objects.count(),
             "total_documents": UploadedDocument.objects.count(),
+            "total_chunks": DocumentChunk.objects.count(),
             "most_asked_questions": most_asked,
             "language_distribution": language_distribution,
             "unanswered_by_status": unanswered_by_status,
+            "feedback_summary": feedback_summary,
         }
         return Response(AnalyticsSerializer(payload).data)

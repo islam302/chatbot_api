@@ -11,7 +11,7 @@ import time
 
 from django.utils import timezone
 
-from knowledge.services.rag import RagService, RagUnavailable
+from knowledge.services.rag import RagUnavailable, answer_question
 
 from ..models import (
     WhatsAppMessage,
@@ -123,7 +123,7 @@ def _route(text: str, user: WhatsAppUser) -> str:
         return _handle_language(text, user)
 
     try:
-        result = RagService.instance().answer(text)
+        result = answer_question(text)
     except RagUnavailable:
         return (
             "I cannot search our knowledge base right now. Please try again later."

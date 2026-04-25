@@ -1,35 +1,79 @@
 # ChatBot API
 
-Django REST Framework API for the ChatBot platform with WhatsApp integration.
+Django REST Framework API powering a knowledge-grounded chatbot, with a
+modern RAG pipeline and a WhatsApp Cloud API integration.
 
 ## Stack
 
 - Django 5.x + Django REST Framework
 - JWT auth (`djangorestframework-simplejwt` with token blacklist)
-- Filtering / pagination via `django-filter`
-- OpenAPI 3 schema and Swagger UI via `drf-spectacular`
-- Optional RAG layer using LangChain + FAISS + OpenAI
-- WhatsApp Cloud API integration
+- `django-filter`, `drf-spectacular`, OpenAPI 3 docs
+- **RAG pipeline**: Q&A bank → document retrieval → fallback
+  - Embeddings: OpenAI `text-embedding-3-large` (multilingual)
+  - LLM: configurable (`gpt-4o`, `claude-sonnet-4-6`, …)
+  - Storage: persisted `DocumentChunk` rows with JSON embeddings,
+    cosine search via numpy (swap for pgvector when you outgrow this)
+- WhatsApp Cloud API integration (webhook + send)
+
+## How the chatbot answers a question
+
+```
+question
+   │
+   ├─► (1) Q&A bank — embedding match across FixedQuestion + QuestionAnswer
+   │       above QA_BANK_THRESHOLD (default 0.82) ──► return curated answer
+   │
+   ├─► (2) RAG over DocumentChunk — top-k chunks above RAG_SIMILARITY_THRESHOLD
+   │       (default 0.45) ──► LLM with strict "answer only from context" prompt
+   │
+   └─► (3) Fallback ──► record as UnansweredQuestion for review
+```
+
+Every reply carries its `source` (`qa_bank` / `rag` / `fallback`) and the
+matching sources, so the client can render confidence/citations and post
+👍/👎 feedback to `/api/v1/chat/feedback/`.
+
+## How to "train" the bot on your data
+
+1. **Add Q&A pairs** via `/api/v1/fixed-questions/` or `/api/v1/questions/` —
+   embeddings are generated automatically by a post-save signal.
+2. **Upload reference docs** via `POST /api/v1/documents/` (multipart).
+   Each upload is parsed → chunked → embedded → stored in `DocumentChunk`
+   synchronously. The next chat request retrieves from the new chunks.
+3. **Backfill** for rows that were missing embeddings:
+   ```bash
+   python manage.py embed_qa            # missing only
+   python manage.py embed_qa --all      # re-embed everything
+   python manage.py reindex_documents   # PENDING / FAILED docs
+   ```
+
+There is no fine-tuning step. Putting authoritative Q&A in the bank +
+clean reference documents in the doc store is the modern best practice
+and gives you full control over what the bot says.
 
 ## Project layout
 
 ```
 ChatBotApi/
-├── Conf/                  Django project (settings, urls, wsgi/asgi)
-├── knowledge/              Q&A, tree, languages, documents, chat, analytics
-│   ├── models.py
+├── Conf/                     Django project (settings, urls, wsgi/asgi)
+├── knowledge/                Q&A, tree, languages, documents, chat, analytics
+│   ├── models.py             FixedQuestion, QuestionAnswer, DocumentChunk,
+│   │                         ChatFeedback, …
 │   ├── filters.py
 │   ├── permissions.py
-│   ├── serializers/       split per resource
-│   ├── views/             split per resource
-│   ├── services/          rag.py, excel_import.py
-│   └── urls.py            DRF router + APIViews
-├── WhatsApp/              Meta WhatsApp Cloud API integration
-│   ├── models.py
-│   ├── serializers.py
-│   ├── views.py
-│   ├── services/          meta_client.py, conversation.py
-│   └── urls.py
+│   ├── signals.py            post-save → auto-embed Q&A
+│   ├── serializers/          split per resource
+│   ├── views/                split per resource
+│   ├── services/
+│   │   ├── embeddings.py     provider-agnostic embedding client
+│   │   ├── llm.py            provider-agnostic chat client (openai|anthropic)
+│   │   ├── retrieval.py      Q&A + chunk cosine search (numpy)
+│   │   ├── chunking.py       parse + chunk + embed + persist
+│   │   ├── rag.py            answer_question() — Q&A → RAG → fallback
+│   │   └── excel_import.py
+│   ├── management/commands/  embed_qa, reindex_documents
+│   └── urls.py               DRF router + APIViews
+├── WhatsApp/                 Meta WhatsApp Cloud API integration
 ├── manage.py
 ├── requirements.txt
 └── .env.example
@@ -38,21 +82,14 @@ ChatBotApi/
 ## Getting started
 
 ```bash
-# 1. Create a virtualenv and install deps
 python -m venv .venv
 . .venv/Scripts/activate          # Windows
 pip install -r requirements.txt
 
-# 2. Configure environment
-cp .env.example .env
-# edit .env and set SECRET_KEY, OPENAI_API_KEY, WHATSAPP_*, etc.
+cp .env.example .env              # set SECRET_KEY, OPENAI_API_KEY, …
 
-# 3. Migrate and create a superuser
-python manage.py makemigrations knowledge WhatsApp
 python manage.py migrate
 python manage.py createsuperuser
-
-# 4. Run the dev server
 python manage.py runserver
 ```
 
@@ -60,42 +97,46 @@ python manage.py runserver
 
 All endpoints are mounted under `/api/v1/`.
 
-| Endpoint                           | Description                                  |
-|------------------------------------|----------------------------------------------|
-| `POST /auth/login/`                | Obtain a JWT token pair                      |
-| `POST /auth/refresh/`              | Refresh an access token                      |
-| `POST /auth/verify/`               | Verify an access token                       |
-| `POST /users/register/`            | Register a new user                          |
-| `GET  /users/me/`                  | Current authenticated user                   |
-| `*    /fixed-questions/`           | Fixed Q&A CRUD + `most-asked` action         |
-| `*    /questions/`                 | Dynamic Q&A CRUD + `increment-count`, bulk  |
-| `*    /unanswered-questions/`      | Unanswered queue + `assign` action           |
-| `*    /question-tree/`             | Tree CRUD + `tree`, `children` actions       |
-| `*    /languages/`                 | Available languages                          |
-| `*    /documents/`                 | RAG document storage (multipart upload)      |
-| `POST /imports/excel/`             | Bulk-import Q&A rows from .xlsx              |
-| `POST /chat/`                      | RAG / Q&A chat                               |
-| `POST /search/`                    | Cross-resource search                        |
-| `GET  /analytics/`                 | Aggregated stats                             |
-| `*    /whatsapp/users/`            | Read-only WhatsApp user list                 |
-| `*    /whatsapp/sessions/`         | Read-only sessions                           |
-| `*    /whatsapp/messages/`         | Read-only message log                        |
-| `*    /whatsapp/analytics/`        | Read-only daily analytics                    |
-| `POST /whatsapp/send/`             | Send a free-form WhatsApp text               |
-| `GET  /whatsapp/webhook/`          | Meta webhook verification                    |
-| `POST /whatsapp/webhook/`          | Meta webhook receiver                        |
+| Endpoint                            | Description                                |
+|-------------------------------------|--------------------------------------------|
+| `POST /auth/login/`                 | Obtain a JWT token pair                    |
+| `POST /auth/refresh/`               | Refresh an access token                    |
+| `POST /auth/verify/`                | Verify an access token                     |
+| `POST /users/register/`             | Register a new user                        |
+| `GET  /users/me/`                   | Current authenticated user                 |
+| `*    /fixed-questions/`            | Fixed Q&A CRUD + `most-asked`              |
+| `*    /questions/`                  | Dynamic Q&A CRUD + `increment-count`, bulk |
+| `*    /unanswered-questions/`       | Unanswered queue + `assign`                |
+| `*    /question-tree/`              | Hierarchical tree CRUD + `tree`, `children`|
+| `*    /languages/`                  | Available languages                        |
+| `*    /documents/`                  | Doc upload (auto-ingest) + `reindex`       |
+| `POST /imports/excel/`              | Bulk-import Q&A from .xlsx                 |
+| `POST /chat/`                       | Q&A bank → RAG → fallback chat             |
+| `POST /chat/feedback/`              | 👍/👎 feedback on an answer                |
+| `POST /search/`                     | Cross-resource keyword search              |
+| `GET  /analytics/`                  | Aggregated stats incl. chunk + feedback    |
+| `*    /whatsapp/users\|sessions\|messages\|analytics/` | Read-only WhatsApp data |
+| `POST /whatsapp/send/`              | Send a free-form WhatsApp text             |
+| `GET/POST /whatsapp/webhook/`       | Meta webhook verify / receiver             |
 
-OpenAPI schema is available at `/api/schema/`, Swagger UI at `/api/docs/`,
-and ReDoc at `/api/redoc/`.
+OpenAPI schema at `/api/schema/`, Swagger UI at `/api/docs/`, ReDoc at `/api/redoc/`.
 
-## Authentication
+## Configuration knobs (env)
 
-Most endpoints require a Bearer JWT:
+| Variable                   | Default                       | Notes |
+|----------------------------|-------------------------------|-------|
+| `EMBEDDING_PROVIDER`       | `openai`                      |       |
+| `EMBEDDING_MODEL`          | `text-embedding-3-large`      | use `-small` for cheaper, lower quality |
+| `LLM_PROVIDER`             | `openai`                      | `openai` or `anthropic` |
+| `LLM_MODEL`                | `gpt-4o`                      | e.g. `claude-sonnet-4-6` |
+| `QA_BANK_THRESHOLD`        | `0.82`                        | cosine threshold for the curated bank |
+| `RAG_SIMILARITY_THRESHOLD` | `0.45`                        | cosine threshold for chunk retrieval |
+| `DATABASE_URL`             | (sqlite)                      | `postgres://…` switches to Postgres |
 
-```bash
-curl -X POST http://localhost:8000/api/v1/auth/login/ \
-  -H "Content-Type: application/json" \
-  -d '{"username": "alice", "password": "..."}'
-```
+## Roadmap (next leverage)
 
-The chat endpoint and the WhatsApp webhook are public.
+- **pgvector** — drop-in for the JSON embedding storage when datasets grow
+- **Hybrid retrieval** — combine BM25 (Postgres FTS) with dense + RRF fusion
+- **Reranker** — Cohere Rerank or a local cross-encoder for the top-k
+- **Semantic cache** — Redis-backed cache keyed on question embedding
+- **Streaming** — SSE for incremental chat responses

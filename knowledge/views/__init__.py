@@ -1,5 +1,5 @@
 from .auth import CustomTokenObtainPairView, UserViewSet
-from .chat import ChatAPIView, QuestionSearchAPIView
+from .chat import ChatAPIView, ChatFeedbackAPIView, QuestionSearchAPIView
 from .analytics import AnalyticsAPIView
 from .documents import UploadedDocumentViewSet
 from .imports import ExcelImportView
@@ -22,6 +22,7 @@ __all__ = [
     "UploadedDocumentViewSet",
     "ExcelImportView",
     "ChatAPIView",
+    "ChatFeedbackAPIView",
     "QuestionSearchAPIView",
     "AnalyticsAPIView",
 ]

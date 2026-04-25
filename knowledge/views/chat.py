@@ -6,17 +6,23 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ..models import FixedQuestion, QuestionAnswer, UnansweredQuestion
+from ..models import (
+    ChatFeedback,
+    FixedQuestion,
+    QuestionAnswer,
+    UnansweredQuestion,
+)
 from ..serializers import (
+    ChatFeedbackSerializer,
     ChatRequestSerializer,
     ChatResponseSerializer,
     QuestionSearchSerializer,
 )
-from ..services.rag import RagService, RagUnavailable
+from ..services.rag import RagUnavailable, answer_question
 
 
 class ChatAPIView(APIView):
-    """Answer a question using the configured RAG pipeline."""
+    """Answer a question using the Q&A bank → RAG → fallback pipeline."""
 
     permission_classes = [permissions.AllowAny]
 
@@ -25,55 +31,47 @@ class ChatAPIView(APIView):
         serializer = ChatRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-
         question = data["question"]
         history = data.get("history") or []
-        chat_type = data.get("chat_type", "rag")
 
         started = time.monotonic()
-
-        if chat_type == "questions":
-            answer = self._answer_from_questions(question)
-            response = {
-                "answer": answer or "Sorry, I could not find an answer to that question.",
-                "sources": [],
-                "chat_type": "questions",
-            }
-            if not answer:
-                UnansweredQuestion.objects.get_or_create(question=question)
-        else:
-            try:
-                result = RagService.instance().answer(question, history=history)
-            except RagUnavailable as exc:
-                return Response(
-                    {"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE
-                )
-            response = {
-                "answer": result.answer,
-                "sources": result.sources,
-                "chat_type": "rag",
-            }
-
-        response["response_time_ms"] = int((time.monotonic() - started) * 1000)
-        return Response(ChatResponseSerializer(response).data)
-
-    @staticmethod
-    def _answer_from_questions(question: str) -> str | None:
-        match = (
-            QuestionAnswer.objects.filter(is_active=True, question__iexact=question).first()
-            or FixedQuestion.objects.filter(is_active=True, question__iexact=question).first()
-        )
-        if match is None:
-            match = (
-                QuestionAnswer.objects.filter(is_active=True, question__icontains=question)
-                .order_by("-count")
-                .first()
+        try:
+            result = answer_question(question, history=history)
+        except RagUnavailable as exc:
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
-        if match is None:
-            return None
-        if isinstance(match, QuestionAnswer):
-            match.increment_count()
-        return match.answer
+        elapsed = int((time.monotonic() - started) * 1000)
+
+        return Response(
+            ChatResponseSerializer(
+                {
+                    "answer": result.answer,
+                    "source": result.source,
+                    "source_id": result.source_id,
+                    "sources": result.sources,
+                    "confident": result.confident,
+                    "response_time_ms": elapsed,
+                }
+            ).data
+        )
+
+
+class ChatFeedbackAPIView(APIView):
+    """Record 👍/👎 feedback on a chat answer."""
+
+    permission_classes = [permissions.AllowAny]
+
+    @extend_schema(request=ChatFeedbackSerializer, responses={201: ChatFeedbackSerializer})
+    def post(self, request):
+        serializer = ChatFeedbackSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        feedback = serializer.save(
+            user=request.user if request.user.is_authenticated else None
+        )
+        return Response(
+            ChatFeedbackSerializer(feedback).data, status=status.HTTP_201_CREATED
+        )
 
 
 class QuestionSearchAPIView(APIView):

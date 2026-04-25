@@ -6,6 +6,7 @@ from .auth import (
 from .chat import (
     AnalyticsSerializer,
     BulkQuestionUpdateSerializer,
+    ChatFeedbackSerializer,
     ChatRequestSerializer,
     ChatResponseSerializer,
     QuestionSearchSerializer,
@@ -54,4 +55,5 @@ __all__ = [
     "AnalyticsSerializer",
     "QuestionSearchSerializer",
     "BulkQuestionUpdateSerializer",
+    "ChatFeedbackSerializer",
 ]

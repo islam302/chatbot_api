@@ -1,12 +1,18 @@
+import logging
+
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import filters, permissions, viewsets
+from drf_spectacular.utils import extend_schema
+from rest_framework import filters, permissions, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from ..filters import UploadedDocumentFilter
 from ..models import DocumentStatus, UploadedDocument
 from ..serializers import UploadedDocumentSerializer, UploadedDocumentWriteSerializer
-from ..services.rag import RagService
+from ..services.chunking import ingest_document
+
+logger = logging.getLogger(__name__)
 
 
 class UploadedDocumentViewSet(viewsets.ModelViewSet):
@@ -28,12 +34,32 @@ class UploadedDocumentViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         instance = serializer.save(
             uploaded_by=self.request.user,
-            processing_status=DocumentStatus.COMPLETED,
+            processing_status=DocumentStatus.PENDING,
         )
-        RagService.instance().invalidate()
+        try:
+            ingest_document(instance)
+        except Exception:
+            # Status/error already persisted by ingest_document.
+            logger.exception("Document ingestion failed for %s", instance.id)
         return instance
 
-    def perform_destroy(self, instance):
-        instance.file.delete(save=False)
-        super().perform_destroy(instance)
-        RagService.instance().invalidate()
+    @extend_schema(responses={202: UploadedDocumentSerializer})
+    @action(detail=True, methods=["post"], url_path="reindex")
+    def reindex(self, request, pk=None):
+        """Force re-chunking and re-embedding of an existing document."""
+        instance = self.get_object()
+        try:
+            result = ingest_document(instance)
+        except Exception as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        instance.refresh_from_db()
+        return Response(
+            {
+                **UploadedDocumentSerializer(instance).data,
+                "chunks_created": result.chunks_created,
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
