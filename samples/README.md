@@ -6,8 +6,11 @@ pipeline.
 
 | File                       | Topics covered                                           |
 |----------------------------|----------------------------------------------------------|
-| `company_handbook.md`      | Pricing, lead times, support contacts, returns, plans    |
-| `installation_guide.md`    | Box contents, site requirements, first boot, troubleshooting |
+| `company_handbook.docx`    | Pricing, lead times, support contacts, returns, plans    |
+| `installation_guide.docx`  | Box contents, site requirements, first boot, troubleshooting |
+
+The matching `.md` files are the source content (and `_build_docx.py`
+re-renders them to `.docx` if you edit the markdown).
 
 ## End-to-end test
 
@@ -34,11 +37,11 @@ echo $TOKEN
 ```bash
 curl -X POST $BASE/api/v1/documents/ \
   -H "Authorization: Bearer $TOKEN" \
-  -F "file=@samples/company_handbook.md"
+  -F "file=@samples/company_handbook.docx"
 
 curl -X POST $BASE/api/v1/documents/ \
   -H "Authorization: Bearer $TOKEN" \
-  -F "file=@samples/installation_guide.md"
+  -F "file=@samples/installation_guide.docx"
 ```
 
 Each response includes `processing_status: "completed"` and a
