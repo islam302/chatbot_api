@@ -11,7 +11,7 @@ import time
 
 from django.utils import timezone
 
-from Homepage.services.rag import RagService, RagUnavailable
+from knowledge.services.rag import RagService, RagUnavailable
 
 from ..models import (
     WhatsAppMessage,

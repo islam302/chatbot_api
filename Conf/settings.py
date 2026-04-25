@@ -57,7 +57,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "django_filters",
     # Local
-    "Homepage",
+    "knowledge",
     "WhatsApp",
 ]
 
@@ -230,7 +230,7 @@ LOGGING = {
     "root": {"handlers": ["console"], "level": "INFO"},
     "loggers": {
         "django": {"handlers": ["console"], "level": "INFO", "propagate": False},
-        "Homepage": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "knowledge": {"handlers": ["console"], "level": "INFO", "propagate": False},
         "WhatsApp": {"handlers": ["console"], "level": "INFO", "propagate": False},
     },
 }

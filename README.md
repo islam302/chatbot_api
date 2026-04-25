@@ -16,7 +16,7 @@ Django REST Framework API for the ChatBot platform with WhatsApp integration.
 ```
 ChatBotApi/
 ├── Conf/                  Django project (settings, urls, wsgi/asgi)
-├── Homepage/              Q&A, tree, languages, documents, chat, analytics
+├── knowledge/              Q&A, tree, languages, documents, chat, analytics
 │   ├── models.py
 │   ├── filters.py
 │   ├── permissions.py
@@ -48,7 +48,7 @@ cp .env.example .env
 # edit .env and set SECRET_KEY, OPENAI_API_KEY, WHATSAPP_*, etc.
 
 # 3. Migrate and create a superuser
-python manage.py makemigrations Homepage WhatsApp
+python manage.py makemigrations knowledge WhatsApp
 python manage.py migrate
 python manage.py createsuperuser
 
