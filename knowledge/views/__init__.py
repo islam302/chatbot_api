@@ -4,19 +4,13 @@ from .analytics import AnalyticsAPIView
 from .documents import UploadedDocumentViewSet
 from .imports import ExcelImportView
 from .languages import AvailableLanguageViewSet
-from .questions import (
-    FixedQuestionViewSet,
-    QuestionAnswerViewSet,
-    UnansweredQuestionViewSet,
-)
+from .questions import QuestionAnswerViewSet
 from .tree import SimpleQuestionTreeViewSet
 
 __all__ = [
     "CustomTokenObtainPairView",
     "UserViewSet",
-    "FixedQuestionViewSet",
     "QuestionAnswerViewSet",
-    "UnansweredQuestionViewSet",
     "SimpleQuestionTreeViewSet",
     "AvailableLanguageViewSet",
     "UploadedDocumentViewSet",

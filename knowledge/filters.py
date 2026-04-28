@@ -1,20 +1,6 @@
 from django_filters import rest_framework as filters
 
-from .models import (
-    FixedQuestion,
-    QuestionAnswer,
-    SimpleQuestionTree,
-    UnansweredQuestion,
-    UploadedDocument,
-)
-
-
-class FixedQuestionFilter(filters.FilterSet):
-    min_count = filters.NumberFilter(field_name="count", lookup_expr="gte")
-
-    class Meta:
-        model = FixedQuestion
-        fields = ["answer_type", "is_active", "created_by"]
+from .models import QuestionAnswer, SimpleQuestionTree, UploadedDocument
 
 
 class QuestionAnswerFilter(filters.FilterSet):
@@ -22,13 +8,7 @@ class QuestionAnswerFilter(filters.FilterSet):
 
     class Meta:
         model = QuestionAnswer
-        fields = ["answer_type", "is_active", "is_fixed", "created_by", "fixed_question"]
-
-
-class UnansweredQuestionFilter(filters.FilterSet):
-    class Meta:
-        model = UnansweredQuestion
-        fields = ["status", "priority", "assigned_to"]
+        fields = ["answer_type", "is_active", "created_by"]
 
 
 class SimpleQuestionTreeFilter(filters.FilterSet):

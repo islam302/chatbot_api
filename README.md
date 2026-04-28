@@ -20,13 +20,13 @@ modern RAG pipeline and a WhatsApp Cloud API integration.
 ```
 question
    │
-   ├─► (1) Q&A bank — embedding match across FixedQuestion + QuestionAnswer
+   ├─► (1) Q&A bank — embedding match against QuestionAnswer
    │       above QA_BANK_THRESHOLD (default 0.82) ──► return curated answer
    │
    ├─► (2) RAG over DocumentChunk — top-k chunks above RAG_SIMILARITY_THRESHOLD
    │       (default 0.45) ──► LLM with strict "answer only from context" prompt
    │
-   └─► (3) Fallback ──► record as UnansweredQuestion for review
+   └─► (3) Fallback ──► polite "I don't have enough information" reply
 ```
 
 Every reply carries its `source` (`qa_bank` / `rag` / `fallback`) and the
@@ -35,8 +35,9 @@ matching sources, so the client can render confidence/citations and post
 
 ## How to "train" the bot on your data
 
-1. **Add Q&A pairs** via `/api/v1/fixed-questions/` or `/api/v1/questions/` —
-   embeddings are generated automatically by a post-save signal.
+1. **Add Q&A pairs** via `POST /api/v1/questions/` — embeddings are
+   generated automatically by a post-save signal. These are the
+   highest-priority answers (the chat pipeline checks them first).
 2. **Upload reference docs** via `POST /api/v1/documents/` (multipart).
    Each upload is parsed → chunked → embedded → stored in `DocumentChunk`
    synchronously. The next chat request retrieves from the new chunks.
@@ -57,8 +58,9 @@ and gives you full control over what the bot says.
 ChatBotApi/
 ├── Conf/                     Django project (settings, urls, wsgi/asgi)
 ├── knowledge/                Q&A, tree, languages, documents, chat, analytics
-│   ├── models.py             FixedQuestion, QuestionAnswer, DocumentChunk,
-│   │                         ChatFeedback, …
+│   ├── models.py             QuestionAnswer, SimpleQuestionTree,
+│   │                         AvailableLanguage, UploadedDocument,
+│   │                         DocumentChunk, ChatFeedback
 │   ├── filters.py
 │   ├── permissions.py
 │   ├── signals.py            post-save → auto-embed Q&A
@@ -74,6 +76,8 @@ ChatBotApi/
 │   ├── management/commands/  embed_qa, reindex_documents
 │   └── urls.py               DRF router + APIViews
 ├── WhatsApp/                 Meta WhatsApp Cloud API integration
+├── api-docs.html             Standalone HTML reference
+├── samples/                  Demo .docx + walkthrough
 ├── manage.py
 ├── requirements.txt
 └── .env.example
@@ -104,22 +108,22 @@ All endpoints are mounted under `/api/v1/`.
 | `POST /auth/verify/`                | Verify an access token                     |
 | `POST /users/register/`             | Register a new user                        |
 | `GET  /users/me/`                   | Current authenticated user                 |
-| `*    /fixed-questions/`            | Fixed Q&A CRUD + `most-asked`              |
-| `*    /questions/`                  | Dynamic Q&A CRUD + `increment-count`, bulk |
-| `*    /unanswered-questions/`       | Unanswered queue + `assign`                |
+| `*    /questions/`                  | Q&A bank CRUD + `most-asked`, `bulk-update`, `increment-count` |
 | `*    /question-tree/`              | Hierarchical tree CRUD + `tree`, `children`|
 | `*    /languages/`                  | Available languages                        |
 | `*    /documents/`                  | Doc upload (auto-ingest) + `reindex`       |
 | `POST /imports/excel/`              | Bulk-import Q&A from .xlsx                 |
 | `POST /chat/`                       | Q&A bank → RAG → fallback chat             |
 | `POST /chat/feedback/`              | 👍/👎 feedback on an answer                |
-| `POST /search/`                     | Cross-resource keyword search              |
-| `GET  /analytics/`                  | Aggregated stats incl. chunk + feedback    |
+| `POST /search/`                     | LIKE search across the Q&A bank            |
+| `GET  /analytics/`                  | Aggregated stats incl. chunks + feedback   |
 | `*    /whatsapp/users\|sessions\|messages\|analytics/` | Read-only WhatsApp data |
 | `POST /whatsapp/send/`              | Send a free-form WhatsApp text             |
 | `GET/POST /whatsapp/webhook/`       | Meta webhook verify / receiver             |
 
-OpenAPI schema at `/api/schema/`, Swagger UI at `/api/docs/`, ReDoc at `/api/redoc/`.
+OpenAPI schema at `/api/schema/`, Swagger UI at `/api/docs/`, ReDoc at
+`/api/redoc/`. A standalone, browsable reference also lives in
+`api-docs.html` at the project root.
 
 ## Configuration knobs (env)
 

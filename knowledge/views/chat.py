@@ -1,4 +1,5 @@
 import time
+from typing import Optional
 
 from django.db.models import Q
 from drf_spectacular.utils import extend_schema
@@ -6,12 +7,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ..models import (
-    ChatFeedback,
-    FixedQuestion,
-    QuestionAnswer,
-    UnansweredQuestion,
-)
+from ..models import QuestionAnswer
 from ..serializers import (
     ChatFeedbackSerializer,
     ChatRequestSerializer,
@@ -19,6 +15,27 @@ from ..serializers import (
     QuestionSearchSerializer,
 )
 from ..services.rag import RagUnavailable, answer_question
+
+
+def detect_language(text: str) -> str:
+    """Detect language from text. Returns 'ar' or 'en' by default."""
+    try:
+        from langdetect import detect
+        detected = detect(text)
+        # Map common codes to our supported languages
+        lang_map = {
+            "ar": "ar",
+            "en": "en",
+            "es": "es",
+            "fr": "fr",
+            "de": "de",
+            "pt": "pt",
+            "ur": "ur",
+        }
+        return lang_map.get(detected, detected)
+    except Exception:
+        # Default to Arabic if detection fails
+        return "ar"
 
 
 class ChatAPIView(APIView):
@@ -33,10 +50,11 @@ class ChatAPIView(APIView):
         data = serializer.validated_data
         question = data["question"]
         history = data.get("history") or []
+        language = data.get("language") or detect_language(question)
 
         started = time.monotonic()
         try:
-            result = answer_question(question, history=history)
+            result = answer_question(question, history=history, language=language)
         except RagUnavailable as exc:
             return Response(
                 {"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE
@@ -75,6 +93,8 @@ class ChatFeedbackAPIView(APIView):
 
 
 class QuestionSearchAPIView(APIView):
+    """Plain LIKE search across the Q&A bank."""
+
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
     @extend_schema(request=QuestionSearchSerializer)
@@ -83,49 +103,18 @@ class QuestionSearchAPIView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         query = data["query"]
-        question_type = data["question_type"]
         limit = data["limit"]
 
-        results: list[dict] = []
-
-        if question_type in {"fixed", "all"}:
-            for q in FixedQuestion.objects.filter(
-                Q(question__icontains=query) | Q(answer__icontains=query)
-            )[:limit]:
-                results.append(
-                    {
-                        "id": str(q.id),
-                        "question": q.question,
-                        "answer": q.answer,
-                        "type": "fixed",
-                        "count": q.count,
-                    }
-                )
-
-        if question_type in {"dynamic", "all"}:
-            for q in QuestionAnswer.objects.filter(
-                Q(question__icontains=query) | Q(answer__icontains=query)
-            )[:limit]:
-                results.append(
-                    {
-                        "id": str(q.id),
-                        "question": q.question,
-                        "answer": q.answer,
-                        "type": "dynamic",
-                        "count": q.count,
-                    }
-                )
-
-        if question_type in {"unanswered", "all"}:
-            for q in UnansweredQuestion.objects.filter(question__icontains=query)[:limit]:
-                results.append(
-                    {
-                        "id": str(q.id),
-                        "question": q.question,
-                        "answer": None,
-                        "type": "unanswered",
-                        "status": q.status,
-                    }
-                )
-
-        return Response({"results": results[:limit], "total": len(results)})
+        qs = QuestionAnswer.objects.filter(
+            Q(question__icontains=query) | Q(answer__icontains=query)
+        )[:limit]
+        results = [
+            {
+                "id": str(q.id),
+                "question": q.question,
+                "answer": q.answer,
+                "count": q.count,
+            }
+            for q in qs
+        ]
+        return Response({"results": results, "total": len(results)})

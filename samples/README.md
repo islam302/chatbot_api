@@ -50,11 +50,11 @@ seconds for these short docs).
 
 ### 3. (Optional) Seed the Q&A bank
 
-This proves the **Q&A bank → RAG** priority order works: the bank
-answer should win even though the doc would also retrieve.
+This proves the **Q&A bank → RAG** priority order: the bank answer
+should win even though the doc would also retrieve.
 
 ```bash
-curl -X POST $BASE/api/v1/fixed-questions/ \
+curl -X POST $BASE/api/v1/questions/ \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{

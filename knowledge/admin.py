@@ -4,36 +4,18 @@ from .models import (
     AvailableLanguage,
     ChatFeedback,
     DocumentChunk,
-    FixedQuestion,
     QuestionAnswer,
     SimpleQuestionTree,
-    UnansweredQuestion,
     UploadedDocument,
 )
 
 
-@admin.register(FixedQuestion)
-class FixedQuestionAdmin(admin.ModelAdmin):
+@admin.register(QuestionAnswer)
+class QuestionAnswerAdmin(admin.ModelAdmin):
     list_display = ("question", "answer_type", "count", "is_active", "created_at")
     list_filter = ("answer_type", "is_active", "created_at")
     search_fields = ("question", "answer", "overview_description")
     readonly_fields = ("id", "count", "created_at", "updated_at")
-
-
-@admin.register(QuestionAnswer)
-class QuestionAnswerAdmin(admin.ModelAdmin):
-    list_display = ("question", "answer_type", "count", "is_fixed", "is_active", "created_at")
-    list_filter = ("answer_type", "is_fixed", "is_active", "created_at")
-    search_fields = ("question", "answer", "overview_description")
-    readonly_fields = ("id", "count", "created_at", "updated_at")
-
-
-@admin.register(UnansweredQuestion)
-class UnansweredQuestionAdmin(admin.ModelAdmin):
-    list_display = ("question", "status", "priority", "assigned_to", "created_at")
-    list_filter = ("status", "priority")
-    search_fields = ("question",)
-    readonly_fields = ("id", "created_at", "updated_at")
 
 
 @admin.register(SimpleQuestionTree)

@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from django.core.management.base import BaseCommand
 
-from knowledge.models import FixedQuestion, QuestionAnswer
+from knowledge.models import QuestionAnswer
 from knowledge.services.embeddings import embed_texts
 
 
 class Command(BaseCommand):
-    help = "Compute and store embeddings for FixedQuestion and QuestionAnswer rows."
+    help = "Compute and store embeddings for QuestionAnswer rows."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -31,29 +31,29 @@ class Command(BaseCommand):
         force = options["all"]
         batch = options["batch"]
 
+        model = QuestionAnswer
+        qs = model.objects.all() if force else model.objects.filter(embedding__isnull=True)
+        count = qs.count()
+        if not count:
+            self.stdout.write("Nothing to embed.")
+            return
+
+        self.stdout.write(f"Embedding {count} row(s)…")
         total = 0
-        for model in (FixedQuestion, QuestionAnswer):
-            qs = model.objects.all() if force else model.objects.filter(embedding__isnull=True)
-            count = qs.count()
-            if not count:
-                self.stdout.write(f"{model.__name__}: nothing to embed.")
-                continue
+        ids: list = []
+        texts: list[str] = []
 
-            self.stdout.write(f"{model.__name__}: embedding {count} row(s)…")
-            ids: list = []
-            texts: list[str] = []
-
-            for obj in qs.iterator(chunk_size=batch):
-                ids.append(obj.id)
-                texts.append(_make_input(obj))
-                if len(ids) >= batch:
-                    self._flush(model, ids, texts)
-                    total += len(ids)
-                    ids, texts = [], []
-
-            if ids:
+        for obj in qs.iterator(chunk_size=batch):
+            ids.append(obj.id)
+            texts.append(_make_input(obj))
+            if len(ids) >= batch:
                 self._flush(model, ids, texts)
                 total += len(ids)
+                ids, texts = [], []
+
+        if ids:
+            self._flush(model, ids, texts)
+            total += len(ids)
 
         self.stdout.write(self.style.SUCCESS(f"Embedded {total} row(s)."))
 

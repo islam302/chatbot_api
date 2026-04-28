@@ -20,12 +20,8 @@ from .languages import (
     AvailableLanguageWriteSerializer,
 )
 from .questions import (
-    FixedQuestionSerializer,
-    FixedQuestionWriteSerializer,
     QuestionAnswerSerializer,
     QuestionAnswerWriteSerializer,
-    UnansweredQuestionSerializer,
-    UnansweredQuestionWriteSerializer,
 )
 from .tree import (
     SimpleQuestionTreeSerializer,
@@ -37,12 +33,8 @@ __all__ = [
     "CustomTokenObtainPairSerializer",
     "UserRegistrationSerializer",
     "UserSerializer",
-    "FixedQuestionSerializer",
-    "FixedQuestionWriteSerializer",
     "QuestionAnswerSerializer",
     "QuestionAnswerWriteSerializer",
-    "UnansweredQuestionSerializer",
-    "UnansweredQuestionWriteSerializer",
     "SimpleQuestionTreeSerializer",
     "SimpleQuestionTreeWriteSerializer",
     "SimpleQuestionTreeNodeSerializer",

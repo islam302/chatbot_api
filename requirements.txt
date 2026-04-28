@@ -26,6 +26,9 @@ anthropic>=0.39,<1.0
 # Document parsing
 docx2txt>=0.9,<1.0
 
+# Language detection
+langdetect>=1.0,<2.0
+
 # Excel import
 openpyxl>=3.1,<4.0
 

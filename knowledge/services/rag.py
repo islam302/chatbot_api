@@ -2,18 +2,17 @@
 
 Order of operations (all configurable):
 
-1. **Q&A bank** — semantic match against ``FixedQuestion`` and ``QuestionAnswer``.
-   If the top hit is above ``QA_BANK_THRESHOLD``, return the curated answer
-   directly. This is the single highest-quality signal: it's an answer
-   you've already vetted.
+1. **Q&A bank** — semantic match against ``QuestionAnswer``.
+   If the top hit is above ``QA_BANK_THRESHOLD``, return the curated
+   answer directly. This is the highest-quality signal: an answer you
+   already vetted.
 
-2. **RAG over documents** — semantic search over ``DocumentChunk`` rows.
+2. **RAG over documents** — semantic search over ``DocumentChunk``.
    The top chunks are stitched into a context window and passed to the
    configured LLM with a strict "answer only from context" system prompt.
 
-3. **Fallback** — if neither produces a confident result, return a polite
-   "I don't know" response and record the question as ``UnansweredQuestion``
-   so it can be triaged later.
+3. **Fallback** — if neither produces a confident result, return a
+   polite "I don't have enough information" response.
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ import os
 from dataclasses import dataclass, field
 from typing import Iterable
 
-from ..models import UnansweredQuestion
 from .llm import LLMError, get_backend
 from .retrieval import ChunkHit, QAHit, search_chunks, search_qa_bank
 
@@ -34,10 +32,28 @@ SYSTEM_PROMPT = """You are a careful assistant grounded in the provided context.
 
 Rules:
 - Answer ONLY using information from the "Context" section.
-- If the answer is not in the context, reply that you do not have enough information and suggest the user contact a human.
+- If the answer is not in the context, reply that you do not have enough information.
 - Quote URLs and identifiers verbatim.
 - Reply in the same language as the question.
 - Keep answers concise and structured.
+"""
+
+
+SMALLTALK_PROMPT = """You are a friendly assistant for our knowledge base.
+The user sent a message but no relevant content was found in our indexed
+Q&A or documents. Decide which case this is and reply accordingly:
+
+A) Greeting, thanks, goodbye, or other small talk / social pleasantry:
+   Reply warmly and briefly. You may invite them to ask a question
+   about the topics covered by our knowledge base.
+
+B) A real question that is outside our knowledge base:
+   Politely say you do not have information about that topic and that
+   they should contact a human or rephrase within scope.
+   DO NOT answer from your own general knowledge — that is forbidden.
+
+Always reply in the same language as the user's message.
+Keep the reply short (1–3 sentences).
 """
 
 
@@ -60,9 +76,9 @@ def answer_question(
     question: str,
     *,
     history: Iterable[dict] | None = None,
+    language: str = "ar",
     qa_threshold: float | None = None,
     rag_threshold: float | None = None,
-    log_unanswered: bool = True,
 ) -> AnswerResult:
     qa_threshold = (
         qa_threshold
@@ -89,7 +105,7 @@ def answer_question(
             source="qa_bank",
             source_id=top.id,
             sources=[
-                {"type": h.source, "id": h.id, "question": h.question, "score": h.score}
+                {"id": h.id, "question": h.question, "score": h.score}
                 for h in qa_hits
             ],
             qa_hits=qa_hits,
@@ -103,7 +119,7 @@ def answer_question(
         raise RagUnavailable(str(exc)) from exc
 
     if not chunks:
-        return _fallback(question, log_unanswered=log_unanswered)
+        return _smalltalk_or_refuse(question, history, language)
 
     context = "\n\n---\n\n".join(
         f"[Source: {hit.filename}#{hit.position}]\n{hit.content}" for hit in chunks
@@ -113,7 +129,8 @@ def answer_question(
     user_prompt = (
         f"Conversation so far:\n{history_text or '(none)'}\n\n"
         f"Context:\n{context}\n\n"
-        f"Question: {question}"
+        f"Question: {question}\n\n"
+        f"[Respond in {language} language]"
     )
 
     try:
@@ -139,17 +156,21 @@ def answer_question(
     )
 
 
-def _fallback(question: str, *, log_unanswered: bool) -> AnswerResult:
-    if log_unanswered:
-        UnansweredQuestion.objects.get_or_create(question=question)
-    return AnswerResult(
-        answer=(
-            "I don't have enough information to answer that yet. "
-            "I've logged the question so it can be reviewed."
-        ),
-        source="fallback",
-        confident=False,
+def _smalltalk_or_refuse(question: str, history: Iterable[dict] | None, language: str = "ar") -> AnswerResult:
+    """Handle out-of-knowledge messages: friendly small talk OR polite refusal."""
+    history_text = _render_history(list(history or []))
+    user_prompt = (
+        f"Conversation so far:\n{history_text or '(none)'}\n\n"
+        f"User message: {question}\n\n"
+        f"[Respond in {language} language]"
     )
+    try:
+        answer = get_backend().complete(SMALLTALK_PROMPT, user_prompt, temperature=0.4)
+    except LLMError as exc:
+        logger.warning("Small-talk fallback LLM unavailable: %s", exc)
+        answer = "I don't have enough information to answer that."
+
+    return AnswerResult(answer=answer, source="fallback", confident=False)
 
 
 def _render_history(history: list[dict]) -> str:

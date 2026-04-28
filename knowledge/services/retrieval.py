@@ -14,7 +14,7 @@ from typing import Iterable, Sequence
 import numpy as np
 from django.db.models import QuerySet
 
-from ..models import DocumentChunk, FixedQuestion, QuestionAnswer
+from ..models import DocumentChunk, QuestionAnswer
 from .embeddings import embed_one
 
 
@@ -23,7 +23,6 @@ class QAHit:
     id: str
     question: str
     answer: str
-    source: str  # "fixed" | "dynamic"
     score: float
 
 
@@ -41,28 +40,18 @@ def search_qa_bank(query: str, *, top_k: int = 5, threshold: float = 0.78) -> li
     """Return the top Q&A matches above ``threshold`` cosine similarity."""
     vector, _ = embed_one(query)
 
-    fixed = list(
-        FixedQuestion.objects.filter(is_active=True).exclude(embedding=None)
-    )
-    dynamic = list(
+    candidates = list(
         QuestionAnswer.objects.filter(is_active=True).exclude(embedding=None)
     )
-    candidates = [
-        ("fixed", obj) for obj in fixed
-    ] + [
-        ("dynamic", obj) for obj in dynamic
-    ]
     if not candidates:
         return []
 
-    matrix = np.array([obj.embedding for _, obj in candidates], dtype=np.float32)
+    matrix = np.array([obj.embedding for obj in candidates], dtype=np.float32)
     scores = _cosine_similarity(np.asarray(vector, dtype=np.float32), matrix)
 
-    ranked = sorted(
-        zip(candidates, scores), key=lambda item: item[1], reverse=True
-    )
+    ranked = sorted(zip(candidates, scores), key=lambda item: item[1], reverse=True)
     hits: list[QAHit] = []
-    for (source, obj), score in ranked[:top_k]:
+    for obj, score in ranked[:top_k]:
         if score < threshold:
             break
         hits.append(
@@ -70,7 +59,6 @@ def search_qa_bank(query: str, *, top_k: int = 5, threshold: float = 0.78) -> li
                 id=str(obj.id),
                 question=obj.question,
                 answer=obj.answer,
-                source=source,
                 score=float(score),
             )
         )

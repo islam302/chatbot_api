@@ -12,13 +12,12 @@ import logging
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-from .models import FixedQuestion, QuestionAnswer
+from .models import QuestionAnswer
 from .services.embeddings import EmbeddingError, embed_one
 
 logger = logging.getLogger(__name__)
 
 
-@receiver(post_save, sender=FixedQuestion)
 @receiver(post_save, sender=QuestionAnswer)
 def embed_qa_row(sender, instance, created, update_fields, **kwargs):
     if update_fields and "embedding" in update_fields:

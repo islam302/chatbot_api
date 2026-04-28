@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ChatBot API — Reference</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #161b22;
+    --panel-2: #1c232c;
+    --border: #2a323d;
+    --text: #d7dde6;
+    --muted: #8a96a4;
+    --accent: #6cb6ff;
+    --accent-2: #8ddb8c;
+    --warn: #f0a868;
+    --danger: #ff7878;
+    --get: #6cb6ff;
+    --post: #8ddb8c;
+    --put: #f0a868;
+    --patch: #d2a8ff;
+    --delete: #ff7878;
+    --code-bg: #0b0f14;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #fafbfc;
+      --panel: #ffffff;
+      --panel-2: #f3f5f8;
+      --border: #d8dee4;
+      --text: #1f2329;
+      --muted: #6a737d;
+      --accent: #0969da;
+      --accent-2: #1a7f37;
+      --warn: #9a6700;
+      --danger: #cf222e;
+      --get: #0969da;
+      --post: #1a7f37;
+      --put: #9a6700;
+      --patch: #8250df;
+      --delete: #cf222e;
+      --code-bg: #f3f5f8;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+    font-size: 15px;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre, .mono {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 13.5px;
+  }
+
+  /* Layout */
+  .layout { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
+  aside {
+    border-right: 1px solid var(--border);
+    background: var(--panel);
+    padding: 24px 18px;
+    position: sticky; top: 0; max-height: 100vh; overflow-y: auto;
+  }
+  main { padding: 32px 48px 80px; max-width: 1100px; }
+  @media (max-width: 880px) {
+    .layout { grid-template-columns: 1fr; }
+    aside { position: static; max-height: none; border-right: none; border-bottom: 1px solid var(--border); }
+    main { padding: 24px 20px 60px; }
+  }
+
+  /* Sidebar */
+  .brand { font-weight: 700; font-size: 16px; margin-bottom: 4px; }
+  .brand small { font-weight: 400; color: var(--muted); display: block; font-size: 12px; }
+  nav h4 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--muted); margin: 22px 0 6px;
+  }
+  nav a { display: block; padding: 4px 8px; border-radius: 4px; color: var(--text); font-size: 13.5px; }
+  nav a:hover { background: var(--panel-2); text-decoration: none; }
+  nav a.sub { padding-left: 18px; color: var(--muted); }
+
+  /* Headings */
+  h1 { font-size: 28px; margin: 8px 0 6px; }
+  h2 {
+    font-size: 22px; margin: 48px 0 8px; padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 { font-size: 17px; margin: 28px 0 4px; }
+  h4 { font-size: 14px; margin: 18px 0 4px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  p { margin: 6px 0 12px; }
+
+  /* Endpoint card */
+  .ep {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 14px 0;
+  }
+  .ep-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .method {
+    font-family: ui-monospace, monospace;
+    font-weight: 700;
+    font-size: 12px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    color: #fff;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .m-get    { background: var(--get); }
+  .m-post   { background: var(--post); }
+  .m-put    { background: var(--put); }
+  .m-patch  { background: var(--patch); }
+  .m-delete { background: var(--delete); }
+  .m-any    { background: var(--muted); }
+  .path { font-family: ui-monospace, monospace; font-size: 14px; word-break: break-all; }
+  .badge {
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 10px;
+    background: var(--panel-2);
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .badge.public { color: var(--accent-2); border-color: var(--accent-2); }
+  .badge.auth   { color: var(--accent); border-color: var(--accent); }
+  .badge.staff  { color: var(--warn);   border-color: var(--warn); }
+  .ep-body { margin-top: 10px; }
+  .ep-body p:first-child { margin-top: 0; }
+
+  /* Code blocks */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    margin: 8px 0;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+  pre code { background: transparent; padding: 0; }
+
+  /* Tables */
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  td code { font-size: 12.5px; }
+
+  /* Misc */
+  .lead { color: var(--muted); margin-bottom: 18px; }
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: var(--panel-2);
+    padding: 10px 14px;
+    margin: 12px 0;
+    border-radius: 0 6px 6px 0;
+  }
+  .callout.warn { border-color: var(--warn); }
+  .callout.danger { border-color: var(--danger); }
+  hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+  ul, ol { margin: 6px 0 12px; padding-left: 22px; }
+  li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<aside>
+  <div class="brand">ChatBot API <small>v2.0 — REST reference</small></div>
+  <nav>
+    <h4>Getting started</h4>
+    <a href="#overview">Overview</a>
+    <a href="#conventions">Conventions</a>
+    <a href="#errors">Errors</a>
+
+    <h4>Authentication</h4>
+    <a href="#auth-login">Login (JWT)</a>
+    <a href="#auth-refresh">Refresh token</a>
+    <a href="#auth-verify">Verify token</a>
+    <a href="#user-register">Register</a>
+    <a href="#user-me">Current user</a>
+    <a href="#user-crud">Users (admin)</a>
+
+    <h4>Knowledge base</h4>
+    <a href="#questions">Questions (Q&amp;A bank)</a>
+    <a href="#question-tree">Question tree</a>
+    <a href="#languages">Languages</a>
+
+    <h4>Documents</h4>
+    <a href="#documents">Documents</a>
+    <a href="#imports">Excel import</a>
+
+    <h4>Chat</h4>
+    <a href="#chat">Chat (RAG)</a>
+    <a href="#chat-feedback">Feedback</a>
+    <a href="#search">Search</a>
+    <a href="#analytics">Analytics</a>
+
+    <h4>WhatsApp</h4>
+    <a href="#wa-webhook">Webhook</a>
+    <a href="#wa-send">Send message</a>
+    <a href="#wa-data">Read-only data</a>
+
+    <h4>Top-level</h4>
+    <a href="#health">Health & schema</a>
+  </nav>
+</aside>
+
+<main>
+
+<h1 id="overview">ChatBot API</h1>
+<p class="lead">Django REST Framework API powering a knowledge-grounded chatbot, with a modern Q&amp;A bank → RAG → fallback pipeline and a WhatsApp Cloud API integration.</p>
+
+<h3>Quick links</h3>
+<ul>
+  <li><strong>OpenAPI schema</strong>: <code>GET /api/schema/</code></li>
+  <li><strong>Swagger UI</strong>: <code>/api/docs/</code></li>
+  <li><strong>ReDoc</strong>: <code>/api/redoc/</code></li>
+</ul>
+
+<h2 id="conventions">Conventions</h2>
+<ul>
+  <li><strong>Base URL</strong>: <code>http://localhost:8000</code> in dev. All routes below are relative to <code>/api/v1/</code>.</li>
+  <li><strong>Format</strong>: JSON for both requests and responses, except file uploads which use <code>multipart/form-data</code>.</li>
+  <li><strong>Auth</strong>: Bearer JWT in the <code>Authorization</code> header for protected endpoints.</li>
+  <li><strong>Pagination</strong>: list endpoints accept <code>?page=&lt;n&gt;&amp;page_size=&lt;n&gt;</code>; default page size is 20.</li>
+  <li><strong>Filtering / search / ordering</strong>: list endpoints accept <code>?search=&lt;q&gt;</code>, <code>?ordering=&lt;field&gt;</code> (prefix <code>-</code> for descending), and resource-specific filter fields documented per endpoint.</li>
+</ul>
+
+<h4>Paginated response shape</h4>
+<pre><code>{
+  "count": 123,
+  "next":  "http://…?page=2",
+  "previous": null,
+  "results": [ … ]
+}</code></pre>
+
+<h4>Auth header</h4>
+<pre><code>Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5…</code></pre>
+
+<h2 id="errors">Errors</h2>
+<table>
+  <tr><th>Status</th><th>When</th></tr>
+  <tr><td><code>400</code></td><td>Validation failure. Body is a per-field map or <code>{"detail": "…"}</code>.</td></tr>
+  <tr><td><code>401</code></td><td>Missing or invalid token.</td></tr>
+  <tr><td><code>403</code></td><td>Authenticated but not allowed (e.g. non-staff hitting an admin endpoint).</td></tr>
+  <tr><td><code>404</code></td><td>Resource not found.</td></tr>
+  <tr><td><code>500</code></td><td>Unhandled server error.</td></tr>
+  <tr><td><code>502</code></td><td>Upstream provider failed (e.g. Meta API rejected an outgoing message).</td></tr>
+  <tr><td><code>503</code></td><td>Chat pipeline cannot run (missing <code>OPENAI_API_KEY</code>, embedding/LLM provider unreachable).</td></tr>
+</table>
+
+<!-- =============================================== AUTH =============================================== -->
+
+<h2 id="authentication">Authentication</h2>
+<p>JWT via <code>djangorestframework-simplejwt</code>. Access tokens live for 1 hour, refresh tokens for 7 days; refresh rotation + blacklist are enabled.</p>
+
+<div class="ep" id="auth-login">
+  <div class="ep-head"><span class="method m-post">POST</span><span class="path">/api/v1/auth/login/</span><span class="badge public">public</span></div>
+  <div class="ep-body">
+    <p>Exchange username and password for a token pair.</p>
+    <h4>Request</h4>
+<pre><code>{"username": "alice", "password": "secret"}</code></pre>
+    <h4>Response — 200</h4>
+<pre><code>{
+  "access":  "eyJhbGciOi…",
+  "refresh": "eyJhbGciOi…",
+  "user":    { "id": 1, "username": "alice", "email": "…", "is_staff": false, "is_active": true, "date_joined": "2026-04-25T18:00:00Z" }
+}</code></pre>
+  </div>
+</div>
+
+<div class="ep" id="auth-refresh">
+  <div class="ep-head"><span class="method m-post">POST</span><span class="path">/api/v1/auth/refresh/</span><span class="badge public">public</span></div>
+  <div class="ep-body">
+    <p>Trade a refresh token for a fresh access token (and a rotated refresh).</p>
+<pre><code>// request
+{"refresh": "eyJhbGciOi…"}
+
+// response 200
+{"access": "eyJhbGciOi…", "refresh": "eyJhbGciOi…"}</code></pre>
+  </div>
+</div>
+
+<div class="ep" id="auth-verify">
+  <div class="ep-head"><span class="method m-post">POST</span><span class="path">/api/v1/auth/verify/</span><span class="badge public">public</span></div>
+  <div class="ep-body">
+    <p>Lightweight check that an access token is still valid. Empty <code>200</code> body when valid; <code>401</code> otherwise.</p>
+<pre><code>{"token": "eyJhbGciOi…"}</code></pre>
+  </div>
+</div>
+
+<div class="ep" id="user-register">
+  <div class="ep-head"><span class="method m-post">POST</span><span class="path">/api/v1/users/register/</span><span class="badge public">public</span></div>
+  <div class="ep-body">
+    <h4>Request</h4>
+<pre><code>{
+  "username": "alice",
+  "email": "alice@example.com",
+  "first_name": "Alice",
+  "last_name": "Smith",
+  "password": "S0meStr0ngPass!",
+  "password_confirm": "S0meStr0ngPass!"
+}</code></pre>
+    <h4>Response — 201</h4>
+    <p>The new user record (same shape as <code>/users/me/</code>).</p>
+  </div>
+</div>
+
+<div class="ep" id="user-me">
+  <div class="ep-head"><span class="method m-get">GET</span><span class="path">/api/v1/users/me/</span><span class="badge auth">auth</span></div>
+  <div class="ep-body">
+<pre><code>{
+  "id": 1,
+  "username": "alice",
+  "email": "alice@example.com",
+  "first_name": "Alice",
+  "last_name": "Smith",
+  "is_staff": false,
+  "is_active": true,
+  "date_joined": "2026-04-25T18:00:00Z"
+}</code></pre>
+  </div>
+</div>
+
+<div class="ep" id="user-crud">
+  <div class="ep-head"><span class="method m-any">CRUD</span><span class="path">/api/v1/users/</span><span class="badge staff">staff</span></div>
+  <div class="ep-body">
+    <p>Standard list / retrieve / create / update / delete on <code>/users/</code> and <code>/users/&lt;id&gt;/</code>. Requires <code>is_staff</code>.</p>
+    <p><strong>Search</strong> on <code>username</code>, <code>email</code>, <code>first_name</code>, <code>last_name</code>. <strong>Ordering</strong>: <code>username | email | date_joined</code>.</p>
+  </div>
+</div>
+
+<!-- =============================================== KNOWLEDGE BASE =============================================== -->
+
+<h2 id="knowledge">Knowledge base</h2>
+<p>Two resources: a Q&amp;A bank (the curated answers your bot should prefer) and a self-referential question tree (for guided menu-style flows). Q&amp;A rows are auto-embedded on save by a post-save signal; failures to embed are non-fatal and can be backfilled with <code>python manage.py embed_qa</code>.</p>
+
+<h3 id="questions">Questions — <code>/api/v1/questions/</code></h3>
+<p>The Q&amp;A bank. The chat pipeline searches these first using semantic similarity; a hit above <code>QA_BANK_THRESHOLD</code> short-circuits the rest of the pipeline and returns your curated answer verbatim.</p>
+
+<table>
+  <tr><th>Method</th><th>Path</th><th>Action</th></tr>
+  <tr><td><code>GET</code></td><td><code>/questions/</code></td><td>List</td></tr>
+  <tr><td><code>POST</code></td><td><code>/questions/</code></td><td>Create (auth)</td></tr>
+  <tr><td><code>GET</code></td><td><code>/questions/&lt;id&gt;/</code></td><td>Retrieve</td></tr>
+  <tr><td><code>PUT/PATCH</code></td><td><code>/questions/&lt;id&gt;/</code></td><td>Update</td></tr>
+  <tr><td><code>DELETE</code></td><td><code>/questions/&lt;id&gt;/</code></td><td>Delete</td></tr>
+  <tr><td><code>POST</code></td><td><code>/questions/&lt;id&gt;/increment-count/</code></td><td>+1 to the asked counter</td></tr>
+  <tr><td><code>GET</code></td><td><code>/questions/most-asked/?limit=N</code></td><td>Top-N by <code>count</code> desc</td></tr>
+  <tr><td><code>POST</code></td><td><code>/questions/bulk-update/</code></td><td>Activate / deactivate / delete N</td></tr>
+</table>
+
+<p><strong>Filters</strong>: <code>answer_type</code>, <code>is_active</code>, <code>created_by</code>, <code>min_count</code>. <strong>Search</strong>: <code>question</code>, <code>answer</code>, <code>overview_description</code>. <strong>Ordering</strong>: <code>created_at | updated_at | count</code>.</p>
+
+<h4>Object shape</h4>
+<pre><code>{
+  "id": "8d1e…",
+  "question": "How long is the warranty?",
+  "answer": "24 months from delivery.",
+  "answer_type": "single",        // or "multiple"
+  "overview_description": "",
+  "count": 42,
+  "is_active": true,
+  "created_by": 1,
+  "created_by_username": "alice",
+  "created_at": "2026-04-25T18:00:00Z",
+  "updated_at": "2026-04-25T18:00:00Z"
+}</code></pre>
+
+<h4>Create / update payload</h4>
+<pre><code>{
+  "question": "How long is the warranty?",
+  "answer":   "24 months from delivery.",
+  "answer_type": "single",
+  "overview_description": "",
+  "is_active": true
+}</code></pre>
+
+<div class="ep">
+  <div class="ep-head"><span class="method m-post">POST</span><span class="path">/api/v1/questions/bulk-update/</span><span class="badge auth">auth</span></div>
+  <div class="ep-body">
+<pre><code>// request
+{
+  "question_ids": ["8d1e…", "9c2f…"],
+  "action": "deactivate"          // "activate" | "deactivate" | "delete"
+}
+
+// response 200
+{"action": "deactivate", "affected": 2}</code></pre>
+  </div>
+</div>
+
+<h3 id="question-tree">Question tree</h3>
+<p>Self-referential tree of guided questions/answers. Each node has a <code>parent</code>, an <code>order</code>, an <code>answer</code>, optional <code>images</code>, and a <code>language</code>.</p>
+
+<table>
+  <tr><th>Method</th><th>Path</th><th>Action</th></tr>
+  <tr><td><code>CRUD</code></td><td><code>/question-tree/</code></td><td>Standard CRUD (flat)</td></tr>
+  <tr><td><code>GET</code></td><td><code>/question-tree/tree/?language=ar</code></td><td>Full nested tree for one language</td></tr>
+  <tr><td><code>GET</code></td><td><code>/question-tree/&lt;id&gt;/children/</code></td><td>Active children of a node</td></tr>
+</table>
+
+<p><strong>Filters</strong>: <code>language</code>, <code>is_active</code>, <code>parent</code>, <code>created_by</code>, <code>root_only=true|false</code>. <strong>Search</strong>: <code>title</code>, <code>answer</code>. <strong>Ordering</strong>: <code>order | created_at | updated_at</code>.</p>
+
+<h4>Flat object</h4>
+<pre><code>{
+  "id": "5f0a…",
+  "title": "Booking",
+  "parent": null,
+  "answer": "Pick an option below.",
+  "images": [],
+  "order": 0,
+  "is_active": true,
+  "language": "en",
+  "has_children": true,
+  "created_by": 1,
+  "created_by_username": "alice",
+  "created_at": "…",
+  "updated_at": "…"
+}</code></pre>
+
+<h4>Nested tree response</h4>
+<pre><code>[
+  {
+    "id": "5f0a…", "title": "Booking", "answer": "Pick an option below.",
+    "images": [], "order": 0, "language": "en",
+    "children": [
+      {"id": "…", "title": "New booking",  "children": []},
+      {"id": "…", "title": "Cancellation", "children": [ … ]}
+    ]
+  }
+]</code></pre>
+
+<h3 id="languages">Languages</h3>
+<p>Drives per-language filtering on the tree. Primary key is the language code.</p>
+
+<table>
+  <tr><th>Method</th><th>Path</th><th>Notes</th></tr>
+  <tr><td><code>CRUD</code></td><td><code>/languages/</code></td><td>Read public; write requires <code>is_staff</code></td></tr>
+  <tr><td><code>GET</code></td><td><code>/languages/&lt;code&gt;/</code></td><td>Lookup by language code</td></tr>
+  <tr><td><code>GET</code></td><td><code>/languages/active/</code></td><td>Convenience: <code>is_active=true</code></td></tr>
+</table>
+
+<pre><code>{
+  "code": "en",
+  "name": "English",
+  "is_active": true,
+  "created_at": "…",
+  "updated_at": "…"
+}</code></pre>
+
+<!-- =============================================== DOCUMENTS =============================================== -->
+
+<h2 id="documents-section">Documents</h2>
+
+<h3 id="documents">Documents — <code>/api/v1/documents/</code></h3>
+<p>Holds reference documents the chatbot can search. On upload the file is parsed → split into overlapping chunks → embedded → persisted as <code>DocumentChunk</code> rows. Once <code>processing_status="completed"</code>, the chunks are part of the next chat retrieval.</p>
+<p>Supported formats: <code>.docx</code>, <code>.txt</code>, <code>.md</code>.</p>
+
+<table>
+  <tr><th>Method</th><th>Path</th><th>Notes</th></tr>
+  <tr><td><code>GET</code></td><td><code>/documents/</code></td><td>List</td></tr>
+  <tr><td><code>POST</code></td><td><code>/documents/</code></td><td>Upload (multipart)</td></tr>
+  <tr><td><code>GET / PUT / PATCH / DELETE</code></td><td><code>/documents/&lt;id&gt;/</code></td><td>Standard</td></tr>
+  <tr><td><code>POST</code></td><td><code>/documents/&lt;id&gt;/reindex/</code></td><td>Re-chunk + re-embed</td></tr>
+</table>
+
+<p><strong>Filters</strong>: <code>processing_status</code>, <code>is_active</code>, <code>uploaded_by</code>. <strong>Search</strong>: <code>filename</code>. <strong>Ordering</strong>: <code>created_at | updated_at | file_size</code>.</p>
+
+<h4>Object shape</h4>
+<pre><code>{
+  "id": "f0e1…",
+  "file": "/media/documents/f0e1…/handbook.docx",
+  "filename": "handbook.docx",
+  "file_size": 38212,
+  "file_size_mb": 0.04,
+  "chunk_count": 6,
+  "processing_status": "completed",   // pending | processing | completed | failed
+  "error_message": "",
+  "is_active": true,
+  "uploaded_by": 1,
+  "uploaded_by_username": "alice",
+  "created_at": "…",
+  "updated_at": "…"
+}</code></pre>
+
+<h4>Create — multipart/form-data</h4>
+<table>
+  <tr><th>Field</th><th>Required</th><th>Notes</th></tr>
+  <tr><td><code>file</code></td><td>yes</td><td>The document binary</td></tr>
+  <tr><td><code>is_active</code></td><td>no</td><td>Defaults to <code>true</code></td></tr>
+</table>
+
+<pre><code>curl -X POST http://localhost:8000/api/v1/documents/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@samples/company_handbook.docx"</code></pre>
+
+<div class="callout warn">
+  If ingestion fails (parser error, embedding API down, …) the row is preserved with
+  <code>processing_status="failed"</code> and the failure reason in <code>error_message</code>.
+  Retry with the <code>reindex</code> action or <code>python manage.py reindex_documents</code>.
+</div>
+
+<h3 id="imports">Excel import — <code>POST /api/v1/imports/excel/</code></h3>
+<p>Bulk-create dynamic Q&amp;A rows from an <code>.xlsx</code> workbook with <code>question</code> and <code>answer</code> columns. Existing rows (matched by <code>question</code>) are skipped silently. Each new row is then embedded by the post-save signal.</p>
+
+<h4>Request — multipart/form-data</h4>
+<table>
+  <tr><th>Field</th><th>Required</th></tr>
+  <tr><td><code>file</code></td><td>yes — the <code>.xlsx</code> file</td></tr>
+</table>
+
+<h4>Response — 201</h4>
+<pre><code>{"created": 18, "skipped": 4}</code></pre>
+
+<!-- =============================================== CHAT =============================================== -->
+
+<h2 id="chat-section">Chat</h2>
+
+<h3 id="chat">Chat — <code>POST /api/v1/chat/</code> <span class="badge public" style="margin-left:6px">public</span></h3>
+<p>Answer a user's question. The pipeline tries three sources in order, stopping at the first hit:</p>
+<ol>
+  <li><strong>Q&amp;A bank</strong> — semantic match against <code>QuestionAnswer</code> above <code>QA_BANK_THRESHOLD</code> (default <code>0.82</code>). Returns the curated answer verbatim. <code>source="qa_bank"</code>.</li>
+  <li><strong>RAG over documents</strong> — top-k <code>DocumentChunk</code> above <code>RAG_SIMILARITY_THRESHOLD</code> (default <code>0.45</code>) → context window → LLM with strict "answer only from context" prompt. <code>source="rag"</code>.</li>
+  <li><strong>Fallback</strong> — polite "I don't have enough information" message. <code>source="fallback"</code>, <code>confident=false</code>.</li>
+</ol>
+
+<h4>Request</h4>
+<pre><code>{
+  "question": "How much does the Atlas-2 Pro cost?",
+  "history": [
+    {"role": "user",      "content": "Hi"},
+    {"role": "assistant", "content": "Hello! How can I help?"}
+  ],
+  "language": "en"
+}</code></pre>
+
+<table>
+  <tr><th>Field</th><th>Required</th><th>Default</th><th>Notes</th></tr>
+  <tr><td><code>question</code></td><td>yes</td><td>—</td><td>≤ 2000 chars</td></tr>
+  <tr><td><code>history</code></td><td>no</td><td><code>[]</code></td><td>Prior turns; only used by the RAG branch</td></tr>
+  <tr><td><code>language</code></td><td>no</td><td><code>"ar"</code></td><td>Hint; the model replies in the question's language regardless</td></tr>
+</table>
+
+<h4>Response — 200</h4>
+<pre><code>{
+  "answer": "The Atlas-2 Pro retails for €18,900.",
+  "source": "rag",                 // qa_bank | rag | fallback
+  "source_id": "",                 // QuestionAnswer id when source=qa_bank
+  "confident": true,
+  "response_time_ms": 842,
+  "sources": [
+    {
+      "filename": "company_handbook.docx",
+      "document_id": "f0e1…",
+      "chunk_id": "ab12…",
+      "position": 4,
+      "score": 0.71
+    }
+  ]
+}</code></pre>
+
+<p>For <code>source="qa_bank"</code>, <code>sources</code> items have a different shape:</p>
+<pre><code>{"id": "8d1e…", "question": "…", "score": 0.91}</code></pre>
+
+<h4>Errors</h4>
+<ul>
+  <li><code>400</code> — validation (e.g. empty <code>question</code>).</li>
+  <li><code>503</code> — RAG stack cannot run (missing <code>OPENAI_API_KEY</code>, embedding/LLM provider unreachable, etc.).</li>
+</ul>
+
+<h4>Knobs (env)</h4>
+<table>
+  <tr><th>Variable</th><th>Default</th><th>Effect</th></tr>
+  <tr><td><code>QA_BANK_THRESHOLD</code></td><td><code>0.82</code></td><td>Higher → only very confident Q&amp;A bank matches</td></tr>
+  <tr><td><code>RAG_SIMILARITY_THRESHOLD</code></td><td><code>0.45</code></td><td>Lower → more chunks accepted into the context</td></tr>
+  <tr><td><code>LLM_PROVIDER</code></td><td><code>openai</code></td><td><code>openai</code> or <code>anthropic</code></td></tr>
+  <tr><td><code>LLM_MODEL</code></td><td><code>gpt-4o</code></td><td>Override per provider</td></tr>
+  <tr><td><code>EMBEDDING_MODEL</code></td><td><code>text-embedding-3-large</code></td><td>Multilingual default</td></tr>
+</table>
+
+<h3 id="chat-feedback">Feedback — <code>POST /api/v1/chat/feedback/</code> <span class="badge public" style="margin-left:6px">public</span></h3>
+
+<h4>Request</h4>
+<pre><code>{
+  "question": "How much does the Atlas-2 Pro cost?",
+  "answer":   "The Atlas-2 Pro retails for €18,900.",
+  "source":   "rag",                  // qa_bank | rag | fallback
+  "source_id": "ab12…",               // optional — id from the chat response
+  "rating":   "up",                   // up | down
+  "comment":  "Spot on, thanks!"      // optional
+}</code></pre>
+
+<h4>Response — 201</h4>
+<p>The persisted feedback row, including a server-set <code>id</code>, <code>user</code> (if authenticated), and <code>created_at</code>.</p>
+
+<h3 id="search">Search — <code>POST /api/v1/search/</code></h3>
+<p>Plain LIKE search across the Q&amp;A bank. For semantic matches use <code>POST /chat/</code> instead.</p>
+
+<h4>Request</h4>
+<pre><code>{
+  "query": "warranty",
+  "question_type": "qa",      // currently only "qa"
+  "limit": 20
+}</code></pre>
+
+<h4>Response — 200</h4>
+<pre><code>{
+  "total": 2,
+  "results": [
+    {"id": "…", "question": "…", "answer": "…", "count": 12},
+    {"id": "…", "question": "…", "answer": "…", "count":  4}
+  ]
+}</code></pre>
+
+<h3 id="analytics">Analytics — <code>GET /api/v1/analytics/</code> <span class="badge auth" style="margin-left:6px">auth</span></h3>
+
+<pre><code>{
+  "total_questions":          412,
+  "total_documents":          6,
+  "total_chunks":             312,
+  "most_asked_questions": [
+    {"id": "8d1e…", "question": "How long is the warranty?", "count": 73}
+  ],
+  "language_distribution":    {"ar": 220, "en": 96},
+  "feedback_summary":         {"up": 84, "down": 7}
+}</code></pre>
+
+<!-- =============================================== WHATSAPP =============================================== -->
+
+<h2 id="whatsapp">WhatsApp Integration</h2>
+<p>Wraps the Meta WhatsApp Cloud API. Incoming messages are routed through the same chat pipeline as the HTTP API.</p>
+
+<h4>Configuration (<code>.env</code>)</h4>
+<table>
+  <tr><th>Variable</th><th>Notes</th></tr>
+  <tr><td><code>WHATSAPP_ACCESS_TOKEN</code></td><td>Long-lived Meta access token</td></tr>
+  <tr><td><code>WHATSAPP_PHONE_NUMBER_ID</code></td><td>Phone-number id to send from</td></tr>
+  <tr><td><code>WHATSAPP_VERIFY_TOKEN</code></td><td>Shared secret you also enter in the Meta console</td></tr>
+</table>
+
+<p>Webhook callback URL to register with Meta:</p>
+<pre><code>https://&lt;your-domain&gt;/api/v1/whatsapp/webhook/</code></pre>
+
+<div class="ep" id="wa-webhook">
+  <div class="ep-head"><span class="method m-get">GET</span><span class="path">/api/v1/whatsapp/webhook/</span><span class="badge public">public</span></div>
+  <div class="ep-body">
+    <p>Meta verification handshake. Echoes <code>hub.challenge</code> when <code>hub.mode=subscribe</code> and <code>hub.verify_token</code> matches <code>WHATSAPP_VERIFY_TOKEN</code>. Returns <code>403</code> on mismatch.</p>
+  </div>
+</div>
+
+<div class="ep">
+  <div class="ep-head"><span class="method m-post">POST</span><span class="path">/api/v1/whatsapp/webhook/</span><span class="badge public">public</span></div>
+  <div class="ep-body">
+    <p>Receives incoming events. The view:</p>
+    <ol>
+      <li>Parses the message (or status update) out of the Meta envelope.</li>
+      <li><code>get_or_create</code> the <code>WhatsAppUser</code> + active 24-h <code>WhatsAppSession</code>.</li>
+      <li>Logs the incoming <code>WhatsAppMessage</code>.</li>
+      <li>Routes the text to <code>answer_question()</code> — same pipeline as <code>POST /chat/</code> — with two slash-commands handled in-process: <code>/help</code> (welcome) and <code>/lang &lt;code&gt;</code> (set language).</li>
+      <li>Sends the reply via the Meta Graph API and logs the outgoing message.</li>
+    </ol>
+    <p>Always returns <code>200 OK</code> to Meta, even on internal failure (per Meta's guidance — failures are logged server-side).</p>
+  </div>
+</div>
+
+<div class="ep" id="wa-send">
+  <div class="ep-head"><span class="method m-post">POST</span><span class="path">/api/v1/whatsapp/send/</span><span class="badge auth">auth</span></div>
+  <div class="ep-body">
+    <p>Send a free-form text message to a WhatsApp user.</p>
+<pre><code>// request
+{
+  "to_number": "201234567890",   // E.164, no leading +
+  "message":   "Your booking has been confirmed."
+}
+
+// response 200
+{"message_id": "wamid.HBgL…", "status": "sent"}</code></pre>
+    <h4>Errors</h4>
+    <ul>
+      <li><code>400</code> — missing fields.</li>
+      <li><code>502</code> — Meta API rejected the request (bad token, missing phone number id, recipient outside the 24-hour session window).</li>
+    </ul>
+  </div>
+</div>
+
+<h3 id="wa-data">Read-only data viewsets</h3>
+<p>Each viewset supports <code>GET /…</code> (list) and <code>GET /…/&lt;id&gt;/</code> (detail). Auth required.</p>
+
+<table>
+  <tr><th>Path</th><th>Resource</th><th>Filters</th></tr>
+  <tr><td><code>/api/v1/whatsapp/users/</code></td><td>WhatsApp users</td><td><code>is_active</code>, <code>language_preference</code>; search on <code>phone_number</code>, <code>profile_name</code></td></tr>
+  <tr><td><code>/api/v1/whatsapp/sessions/</code></td><td>24-h conversation contexts</td><td><code>session_type</code>, <code>is_active</code>, <code>user</code></td></tr>
+  <tr><td><code>/api/v1/whatsapp/messages/</code></td><td>Incoming + outgoing log</td><td><code>message_type</code>, <code>status</code>, <code>user</code>, <code>session</code>; search on <code>message_text</code></td></tr>
+  <tr><td><code>/api/v1/whatsapp/analytics/</code></td><td>Daily aggregates</td><td><code>date</code></td></tr>
+</table>
+
+<!-- =============================================== TOP-LEVEL =============================================== -->
+
+<h2 id="health">Top-level routes</h2>
+<table>
+  <tr><th>Method</th><th>Path</th><th>Notes</th></tr>
+  <tr><td><code>GET</code></td><td><code>/health/</code></td><td>Returns <code>{"status": "ok"}</code>. No auth.</td></tr>
+  <tr><td><code>GET</code></td><td><code>/api/schema/</code></td><td>OpenAPI 3 schema.</td></tr>
+  <tr><td><code>GET</code></td><td><code>/api/docs/</code></td><td>Swagger UI.</td></tr>
+  <tr><td><code>GET</code></td><td><code>/api/redoc/</code></td><td>ReDoc.</td></tr>
+  <tr><td><code>*</code></td><td><code>/admin/</code></td><td>Django admin (staff only).</td></tr>
+</table>
+
+<hr>
+<p style="color: var(--muted); font-size: 12px;">Generated for ChatBot API v2.0 — see <code>/api/schema/</code> for the canonical machine-readable spec.</p>
+
+</main>
+</div>
+</body>
+</html>

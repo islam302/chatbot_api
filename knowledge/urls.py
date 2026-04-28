@@ -9,20 +9,16 @@ from .views import (
     ChatFeedbackAPIView,
     CustomTokenObtainPairView,
     ExcelImportView,
-    FixedQuestionViewSet,
     QuestionAnswerViewSet,
     QuestionSearchAPIView,
     SimpleQuestionTreeViewSet,
-    UnansweredQuestionViewSet,
     UploadedDocumentViewSet,
     UserViewSet,
 )
 
 router = DefaultRouter()
 router.register("users", UserViewSet, basename="user")
-router.register("fixed-questions", FixedQuestionViewSet, basename="fixed-question")
 router.register("questions", QuestionAnswerViewSet, basename="question")
-router.register("unanswered-questions", UnansweredQuestionViewSet, basename="unanswered-question")
 router.register("question-tree", SimpleQuestionTreeViewSet, basename="question-tree")
 router.register("languages", AvailableLanguageViewSet, basename="language")
 router.register("documents", UploadedDocumentViewSet, basename="document")

@@ -26,7 +26,7 @@ class ChatResponseSerializer(serializers.Serializer):
 class QuestionSearchSerializer(serializers.Serializer):
     query = serializers.CharField(max_length=512)
     question_type = serializers.ChoiceField(
-        choices=["fixed", "dynamic", "unanswered", "all"], default="all"
+        choices=["qa"], default="qa"
     )
     language = serializers.CharField(max_length=8, required=False, allow_blank=True)
     limit = serializers.IntegerField(default=20, min_value=1, max_value=200)
@@ -40,14 +40,11 @@ class BulkQuestionUpdateSerializer(serializers.Serializer):
 
 
 class AnalyticsSerializer(serializers.Serializer):
-    total_fixed_questions = serializers.IntegerField()
-    total_dynamic_questions = serializers.IntegerField()
-    total_unanswered = serializers.IntegerField()
+    total_questions = serializers.IntegerField()
     total_documents = serializers.IntegerField()
     total_chunks = serializers.IntegerField()
     most_asked_questions = serializers.ListField(child=serializers.DictField())
     language_distribution = serializers.DictField(child=serializers.IntegerField())
-    unanswered_by_status = serializers.DictField(child=serializers.IntegerField())
     feedback_summary = serializers.DictField(child=serializers.IntegerField())
 
 
