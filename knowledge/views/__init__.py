@@ -1,22 +1,13 @@
+from .api_content import SyncAPIContentView
 from .auth import CustomTokenObtainPairView, UserViewSet
-from .chat import ChatAPIView, ChatFeedbackAPIView, QuestionSearchAPIView
-from .analytics import AnalyticsAPIView
+from .chat import ChatAPIView, ChatFeedbackAPIView
 from .documents import UploadedDocumentViewSet
-from .imports import ExcelImportView
-from .languages import AvailableLanguageViewSet
-from .questions import QuestionAnswerViewSet
-from .tree import SimpleQuestionTreeViewSet
 
 __all__ = [
     "CustomTokenObtainPairView",
     "UserViewSet",
-    "QuestionAnswerViewSet",
-    "SimpleQuestionTreeViewSet",
-    "AvailableLanguageViewSet",
     "UploadedDocumentViewSet",
-    "ExcelImportView",
     "ChatAPIView",
     "ChatFeedbackAPIView",
-    "QuestionSearchAPIView",
-    "AnalyticsAPIView",
+    "SyncAPIContentView",
 ]

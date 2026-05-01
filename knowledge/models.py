@@ -1,12 +1,19 @@
+import binascii
+import os
 import uuid
 
+from django.contrib.auth.models import AbstractUser
 from django.conf import settings
 from django.db import models
 
 
-class AnswerType(models.TextChoices):
-    SINGLE = "single", "Single answer"
-    MULTIPLE = "multiple", "Multiple answers"
+class User(AbstractUser):
+    """Custom User model with UUID primary key."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    class Meta:
+        db_table = "auth_user"
 
 
 class TimestampedModel(models.Model):
@@ -18,10 +25,10 @@ class TimestampedModel(models.Model):
 
 
 class EmbeddingMixin(models.Model):
-    """Stores a vector embedding plus the model that produced it.
+    """Stores vector embeddings for RAG retrieval.
 
-    Stored as JSON for portability — works on SQLite today and is trivially
-    swappable for pgvector later (see services/retrieval.py).
+    Stored as JSON for portability — works on SQLite and is swappable
+    for pgvector later (see services/retrieval.py).
     """
 
     embedding = models.JSONField(null=True, blank=True)
@@ -29,88 +36,6 @@ class EmbeddingMixin(models.Model):
 
     class Meta:
         abstract = True
-
-
-class QuestionAnswer(TimestampedModel, EmbeddingMixin):
-    """A curated Q&A pair. The chat pipeline searches these first."""
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    question = models.TextField(max_length=512)
-    answer = models.TextField(max_length=4096)
-    answer_type = models.CharField(
-        max_length=10, choices=AnswerType.choices, default=AnswerType.SINGLE
-    )
-    overview_description = models.TextField(max_length=5000, blank=True, default="")
-    count = models.PositiveIntegerField(default=0)
-    is_active = models.BooleanField(default=True)
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="questions",
-    )
-
-    class Meta:
-        ordering = ["-created_at"]
-        indexes = [models.Index(fields=["is_active", "-count"])]
-
-    def __str__(self):
-        return self.question[:50]
-
-    def increment_count(self):
-        self.count = models.F("count") + 1
-        self.save(update_fields=["count"])
-        self.refresh_from_db(fields=["count"])
-
-
-class AvailableLanguage(TimestampedModel):
-    code = models.CharField(max_length=8, primary_key=True)
-    name = models.CharField(max_length=50)
-    is_active = models.BooleanField(default=True)
-
-    class Meta:
-        ordering = ["name"]
-
-    def __str__(self):
-        return f"{self.name} ({self.code})"
-
-
-class SimpleQuestionTree(TimestampedModel):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    title = models.CharField(max_length=300)
-    parent = models.ForeignKey(
-        "self",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="children",
-    )
-    answer = models.TextField(blank=True, default="")
-    images = models.JSONField(default=list, blank=True)
-    order = models.PositiveIntegerField(default=0)
-    is_active = models.BooleanField(default=True)
-    language = models.CharField(max_length=8, default="ar")
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="tree_nodes",
-    )
-
-    class Meta:
-        ordering = ["order", "created_at"]
-        indexes = [
-            models.Index(fields=["language", "is_active"]),
-            models.Index(fields=["parent", "order"]),
-        ]
-
-    def __str__(self):
-        return self.title
-
-    def is_root(self):
-        return self.parent_id is None
 
 
 class DocumentStatus(models.TextChoices):
@@ -124,9 +49,14 @@ def upload_document_path(instance, filename):
     return f"documents/{instance.id}/{filename}"
 
 
+class SourceType(models.TextChoices):
+    FILE = "file", "File Upload"
+    API = "api", "API Sync"
+
+
 class UploadedDocument(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    file = models.FileField(upload_to=upload_document_path)
+    file = models.FileField(upload_to=upload_document_path, null=True, blank=True)
     filename = models.CharField(max_length=255)
     file_size = models.PositiveIntegerField(default=0)
     processing_status = models.CharField(
@@ -143,6 +73,13 @@ class UploadedDocument(TimestampedModel):
         blank=True,
         related_name="uploaded_documents",
     )
+    source_type = models.CharField(
+        max_length=10,
+        choices=SourceType.choices,
+        default=SourceType.FILE,
+    )
+    api_url = models.URLField(blank=True, default="", help_text="Source API URL (if synced from API)")
+    items_key = models.CharField(max_length=100, blank=True, default="", help_text="JSON key containing items")
 
     class Meta:
         ordering = ["-created_at"]
@@ -186,9 +123,7 @@ class FeedbackRating(models.TextChoices):
 
 
 class AnswerSource(models.TextChoices):
-    QA_BANK = "qa_bank", "Q&A bank"
     RAG = "rag", "RAG"
-    FALLBACK = "fallback", "Fallback"
 
 
 class ChatFeedback(TimestampedModel):
@@ -219,3 +154,33 @@ class ChatFeedback(TimestampedModel):
 
     def __str__(self):
         return f"{self.rating} {self.question[:40]}"
+
+
+class APIKey(TimestampedModel):
+    """Per-user API key for authentication and multi-tenancy."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="api_key",
+    )
+    key = models.CharField(max_length=40, unique=True, db_index=True)
+    is_active = models.BooleanField(default=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["key", "is_active"])]
+
+    def save(self, *args, **kwargs):
+        if not self.key:
+            self.key = self.generate_key()
+        return super().save(*args, **kwargs)
+
+    @staticmethod
+    def generate_key():
+        return binascii.hexlify(os.urandom(20)).decode()
+
+    def __str__(self):
+        return f"{self.user.username} - {self.key[:8]}..."

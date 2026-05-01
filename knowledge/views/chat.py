@@ -1,18 +1,16 @@
 import time
-from typing import Optional
 
-from django.db.models import Q
 from drf_spectacular.utils import extend_schema
 from rest_framework import permissions, status
+from rest_framework.authentication import TokenAuthentication
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ..models import QuestionAnswer
+from ..auth import APIKeyAuthentication
 from ..serializers import (
     ChatFeedbackSerializer,
     ChatRequestSerializer,
     ChatResponseSerializer,
-    QuestionSearchSerializer,
 )
 from ..services.rag import RagUnavailable, answer_question
 
@@ -22,26 +20,17 @@ def detect_language(text: str) -> str:
     try:
         from langdetect import detect
         detected = detect(text)
-        # Map common codes to our supported languages
-        lang_map = {
-            "ar": "ar",
-            "en": "en",
-            "es": "es",
-            "fr": "fr",
-            "de": "de",
-            "pt": "pt",
-            "ur": "ur",
-        }
+        lang_map = {"ar": "ar", "en": "en", "es": "es", "fr": "fr", "de": "de", "pt": "pt", "ur": "ur"}
         return lang_map.get(detected, detected)
     except Exception:
-        # Default to Arabic if detection fails
         return "ar"
 
 
 class ChatAPIView(APIView):
-    """Answer a question using the Q&A bank → RAG → fallback pipeline."""
+    """Answer a question using RAG pipeline."""
 
-    permission_classes = [permissions.AllowAny]
+    authentication_classes = [APIKeyAuthentication, TokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(request=ChatRequestSerializer, responses={200: ChatResponseSerializer})
     def post(self, request):
@@ -54,7 +43,12 @@ class ChatAPIView(APIView):
 
         started = time.monotonic()
         try:
-            result = answer_question(question, history=history, language=language)
+            result = answer_question(
+                question,
+                history=history,
+                language=language,
+                user=request.user,
+            )
         except RagUnavailable as exc:
             return Response(
                 {"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE
@@ -76,45 +70,16 @@ class ChatAPIView(APIView):
 
 
 class ChatFeedbackAPIView(APIView):
-    """Record 👍/👎 feedback on a chat answer."""
+    """Record feedback on a chat answer."""
 
-    permission_classes = [permissions.AllowAny]
+    authentication_classes = [APIKeyAuthentication, TokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(request=ChatFeedbackSerializer, responses={201: ChatFeedbackSerializer})
     def post(self, request):
         serializer = ChatFeedbackSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        feedback = serializer.save(
-            user=request.user if request.user.is_authenticated else None
-        )
+        feedback = serializer.save(user=request.user)
         return Response(
             ChatFeedbackSerializer(feedback).data, status=status.HTTP_201_CREATED
         )
-
-
-class QuestionSearchAPIView(APIView):
-    """Plain LIKE search across the Q&A bank."""
-
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
-
-    @extend_schema(request=QuestionSearchSerializer)
-    def post(self, request):
-        serializer = QuestionSearchSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        data = serializer.validated_data
-        query = data["query"]
-        limit = data["limit"]
-
-        qs = QuestionAnswer.objects.filter(
-            Q(question__icontains=query) | Q(answer__icontains=query)
-        )[:limit]
-        results = [
-            {
-                "id": str(q.id),
-                "question": q.question,
-                "answer": q.answer,
-                "count": q.count,
-            }
-            for q in qs
-        ]
-        return Response({"results": results, "total": len(results)})

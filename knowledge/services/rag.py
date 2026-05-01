@@ -1,18 +1,7 @@
-"""High-level "answer a question" pipeline.
+"""RAG-only answer pipeline with multilingual and multi-dialect support.
 
-Order of operations (all configurable):
-
-1. **Q&A bank** — semantic match against ``QuestionAnswer``.
-   If the top hit is above ``QA_BANK_THRESHOLD``, return the curated
-   answer directly. This is the highest-quality signal: an answer you
-   already vetted.
-
-2. **RAG over documents** — semantic search over ``DocumentChunk``.
-   The top chunks are stitched into a context window and passed to the
-   configured LLM with a strict "answer only from context" system prompt.
-
-3. **Fallback** — if neither produces a confident result, return a
-   polite "I don't have enough information" response.
+Retrieves relevant document chunks and passes them to an LLM
+for question answering in the user's language and dialect.
 """
 
 from __future__ import annotations
@@ -23,53 +12,72 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from .llm import LLMError, get_backend
-from .retrieval import ChunkHit, QAHit, search_chunks, search_qa_bank
+from .retrieval import ChunkHit, search_chunks
 
 logger = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = """You are a careful assistant grounded in the provided context.
+SYSTEM_PROMPT = """أنت مساعد ذكي ولطيف وودود تجيب على الأسئلة بناءً على المعلومات المتوفرة.
 
-Rules:
-- Answer ONLY using information from the "Context" section.
-- If the answer is not in the context, reply that you do not have enough information.
-- Quote URLs and identifiers verbatim.
-- Reply in the same language as the question.
-- Keep answers concise and structured.
-"""
+القواعد الأساسية:
+- اجب فقط من المعلومات الموجودة في قسم "السياق" (Context).
+- لو المعلومة ما موجودة، قول بأدب واضح إنك ما عندك معلومات كافية.
+- اجب باللغة واللهجة نفسها اللي السؤال اتسأل فيها.
+- كن مرن في الجواب لكن قريب من الأسلوب الطبيعي والودود.
+- اذا الشخص استخدم لهجة معينة (عراقي، مصري، خليجي، شامي، وغيره)، استخدم نفس اللهجة في الرد.
+- كن موجز وواضح ومنظم في الرد.
+- اذا في معلومات متعددة، رتبها بطريقة سهلة وسلسة.
+- اجب بأسلوب شخصي لطيف ما يكون رسمي جداً، بس احترافي وموثوق.
 
-
-SMALLTALK_PROMPT = """You are a friendly assistant for our knowledge base.
-The user sent a message but no relevant content was found in our indexed
-Q&A or documents. Decide which case this is and reply accordingly:
-
-A) Greeting, thanks, goodbye, or other small talk / social pleasantry:
-   Reply warmly and briefly. You may invite them to ask a question
-   about the topics covered by our knowledge base.
-
-B) A real question that is outside our knowledge base:
-   Politely say you do not have information about that topic and that
-   they should contact a human or rephrase within scope.
-   DO NOT answer from your own general knowledge — that is forbidden.
-
-Always reply in the same language as the user's message.
-Keep the reply short (1–3 sentences).
-"""
+Remember:
+- Be empathetic and kind in your tone.
+- Match the user's language (Arabic dialects, English, etc).
+- Use natural, conversational language.
+- Be flexible but maintain accuracy.
+- When uncertain, acknowledge it honestly."""
 
 
 class RagUnavailable(RuntimeError):
-    """Raised when the answer pipeline cannot run (missing key, missing deps)."""
+    """Raised when RAG pipeline cannot run."""
 
 
 @dataclass
 class AnswerResult:
     answer: str
-    source: str  # "qa_bank" | "rag" | "fallback"
+    source: str  # "rag"
     source_id: str = ""
     sources: list[dict] = field(default_factory=list)
-    qa_hits: list[QAHit] = field(default_factory=list)
     chunk_hits: list[ChunkHit] = field(default_factory=list)
     confident: bool = True
+
+
+def detect_dialect(text: str, language: str = "ar") -> str:
+    """Detect Arabic dialect or language variant from text.
+
+    Returns: en, ar-eg, ar-iq, ar-sa, ar-ae, ar-sy, ar-ma, etc.
+    """
+    if language != "ar":
+        return language
+
+    # Arabic dialect indicators (simplified heuristics)
+    dialect_markers = {
+        "ar-iq": ["يعني", "شنو", "صح", "خلاص", "كريت", "مسدس", "اني"],
+        "ar-eg": ["يا جماعة", "يارب", "انت", "إني", "قول", "فين", "ممكن", "يعم"],
+        "ar-sa": ["إن شاء الله", "والله", "إي", "لا", "عسى", "أجل", "صادي"],
+        "ar-ae": ["خلاص", "شنو", "إي", "إله", "شوية", "شوف"],
+        "ar-sy": ["يا", "إرجع", "شوف", "طول", "أشي", "خلاص"],
+        "ar-ma": ["واخا", "فالقيت", "كاع", "شنو", "أشي", "كيفاش"],
+    }
+
+    text_lower = text.lower()
+    dialect_scores = {}
+
+    for dialect, markers in dialect_markers.items():
+        score = sum(1 for marker in markers if marker in text_lower)
+        if score > 0:
+            dialect_scores[dialect] = score
+
+    return max(dialect_scores, key=dialect_scores.get) if dialect_scores else "ar"
 
 
 def answer_question(
@@ -77,60 +85,66 @@ def answer_question(
     *,
     history: Iterable[dict] | None = None,
     language: str = "ar",
-    qa_threshold: float | None = None,
     rag_threshold: float | None = None,
+    user=None,
 ) -> AnswerResult:
-    qa_threshold = (
-        qa_threshold
-        if qa_threshold is not None
-        else float(os.getenv("QA_BANK_THRESHOLD", "0.82"))
-    )
     rag_threshold = (
         rag_threshold
         if rag_threshold is not None
         else float(os.getenv("RAG_SIMILARITY_THRESHOLD", "0.45"))
     )
 
-    # 1) Q&A bank
-    try:
-        qa_hits = search_qa_bank(question, top_k=3, threshold=qa_threshold)
-    except Exception:
-        logger.exception("Q&A bank search failed; continuing with RAG")
-        qa_hits = []
+    # Detect dialect for more natural responses
+    dialect = detect_dialect(question, language)
 
-    if qa_hits:
-        top = qa_hits[0]
-        return AnswerResult(
-            answer=top.answer,
-            source="qa_bank",
-            source_id=top.id,
-            sources=[
-                {"id": h.id, "question": h.question, "score": h.score}
-                for h in qa_hits
-            ],
-            qa_hits=qa_hits,
-        )
-
-    # 2) RAG over document chunks
     try:
-        chunks = search_chunks(question, top_k=6, threshold=rag_threshold)
+        chunks = search_chunks(question, top_k=6, threshold=rag_threshold, user=user)
     except Exception as exc:
         logger.exception("Chunk search failed")
         raise RagUnavailable(str(exc)) from exc
 
     if not chunks:
-        return _smalltalk_or_refuse(question, history, language)
+        no_info_messages = {
+            "ar": "للأسف ما عندي معلومات كافية عشان أجاوب على سؤالك. ممكن تعيد صيغة السؤال؟",
+            "ar-iq": "يعني ما عندي معلومات كافية، تعيد السؤال بطريقة ثانية؟",
+            "ar-eg": "آسف يعني ما عندي معلومات كفاية. تقول السؤال بطريقة تانية؟",
+            "ar-sa": "للأسف ما فيه معلومات، جرب تسأل بطريقة ثانية إن شاء الله.",
+            "en": "I don't have enough information to answer that question. Could you rephrase it?",
+        }
+        answer = no_info_messages.get(dialect, no_info_messages.get(language, no_info_messages["ar"]))
+        return AnswerResult(answer=answer, source="rag", confident=False)
 
     context = "\n\n---\n\n".join(
-        f"[Source: {hit.filename}#{hit.position}]\n{hit.content}" for hit in chunks
+        f"[المصدر/Source: {hit.filename}#{hit.position}]\n{hit.content}" for hit in chunks
     )
     history_text = _render_history(list(history or []))
 
+    # Build a dialect-aware prompt
+    dialect_instructions = ""
+    if language == "ar":
+        if dialect.startswith("ar-"):
+            dialect_code = dialect.split("-")[1]
+            dialect_instruction_map = {
+                "iq": "استخدم اللهجة العراقية الطبيعية والودية.",
+                "eg": "استخدم اللهجة المصرية الطبيعية والودية.",
+                "sa": "استخدم اللهجة الخليجية الطبيعية والودية.",
+                "ae": "استخدم اللهجة الإماراتية الطبيعية والودية.",
+                "sy": "استخدم اللهجة الشامية الطبيعية والودية.",
+                "ma": "استخدم اللهجة المغربية الطبيعية والودية.",
+            }
+            dialect_instructions = dialect_instruction_map.get(dialect_code, "استخدم اللهجة العربية الطبيعية والودية.")
+        else:
+            dialect_instructions = "استخدم الفصحى السهلة والودية المناسبة للجميع."
+
     user_prompt = (
-        f"Conversation so far:\n{history_text or '(none)'}\n\n"
-        f"Context:\n{context}\n\n"
-        f"Question: {question}\n\n"
-        f"[Respond in {language} language]"
+        f"المحادثة حتى الآن/Conversation so far:\n{history_text or '(لا توجد/None)'}\n\n"
+        f"السياق/Context:\n{context}\n\n"
+        f"السؤال/Question: {question}\n\n"
+        f"التعليمات/Instructions:\n"
+        f"- {dialect_instructions}\n"
+        f"- أجب بطريقة طبيعية ولطيفة ومرنة.\n"
+        f"- كن موجز وواضح.\n"
+        f"- استخدم نفس اللغة/اللهجة في الرد."
     )
 
     try:
@@ -154,23 +168,6 @@ def answer_question(
         ],
         chunk_hits=chunks,
     )
-
-
-def _smalltalk_or_refuse(question: str, history: Iterable[dict] | None, language: str = "ar") -> AnswerResult:
-    """Handle out-of-knowledge messages: friendly small talk OR polite refusal."""
-    history_text = _render_history(list(history or []))
-    user_prompt = (
-        f"Conversation so far:\n{history_text or '(none)'}\n\n"
-        f"User message: {question}\n\n"
-        f"[Respond in {language} language]"
-    )
-    try:
-        answer = get_backend().complete(SMALLTALK_PROMPT, user_prompt, temperature=0.4)
-    except LLMError as exc:
-        logger.warning("Small-talk fallback LLM unavailable: %s", exc)
-        answer = "I don't have enough information to answer that."
-
-    return AnswerResult(answer=answer, source="fallback", confident=False)
 
 
 def _render_history(history: list[dict]) -> str:

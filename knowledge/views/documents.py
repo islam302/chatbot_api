@@ -3,10 +3,12 @@ import logging
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
 from rest_framework import filters, permissions, status, viewsets
+from rest_framework.authentication import TokenAuthentication
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
+from ..auth import APIKeyAuthentication
 from ..filters import UploadedDocumentFilter
 from ..models import DocumentStatus, UploadedDocument
 from ..serializers import UploadedDocumentSerializer, UploadedDocumentWriteSerializer
@@ -18,6 +20,7 @@ logger = logging.getLogger(__name__)
 class UploadedDocumentViewSet(viewsets.ModelViewSet):
     queryset = UploadedDocument.objects.all()
     serializer_class = UploadedDocumentSerializer
+    authentication_classes = [APIKeyAuthentication, TokenAuthentication]
     permission_classes = [permissions.IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -25,6 +28,9 @@ class UploadedDocumentViewSet(viewsets.ModelViewSet):
     search_fields = ["filename"]
     ordering_fields = ["created_at", "updated_at", "file_size"]
     ordering = ["-created_at"]
+
+    def get_queryset(self):
+        return UploadedDocument.objects.filter(uploaded_by=self.request.user)
 
     def get_serializer_class(self):
         if self.action in {"create", "update", "partial_update"}:

@@ -23,31 +23,6 @@ class ChatResponseSerializer(serializers.Serializer):
     response_time_ms = serializers.IntegerField(required=False)
 
 
-class QuestionSearchSerializer(serializers.Serializer):
-    query = serializers.CharField(max_length=512)
-    question_type = serializers.ChoiceField(
-        choices=["qa"], default="qa"
-    )
-    language = serializers.CharField(max_length=8, required=False, allow_blank=True)
-    limit = serializers.IntegerField(default=20, min_value=1, max_value=200)
-
-
-class BulkQuestionUpdateSerializer(serializers.Serializer):
-    ACTIONS = ["activate", "deactivate", "delete"]
-
-    question_ids = serializers.ListField(child=serializers.UUIDField(), allow_empty=False)
-    action = serializers.ChoiceField(choices=ACTIONS)
-
-
-class AnalyticsSerializer(serializers.Serializer):
-    total_questions = serializers.IntegerField()
-    total_documents = serializers.IntegerField()
-    total_chunks = serializers.IntegerField()
-    most_asked_questions = serializers.ListField(child=serializers.DictField())
-    language_distribution = serializers.DictField(child=serializers.IntegerField())
-    feedback_summary = serializers.DictField(child=serializers.IntegerField())
-
-
 class ChatFeedbackSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChatFeedback

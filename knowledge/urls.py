@@ -3,24 +3,16 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
 
 from .views import (
-    AnalyticsAPIView,
-    AvailableLanguageViewSet,
     ChatAPIView,
     ChatFeedbackAPIView,
     CustomTokenObtainPairView,
-    ExcelImportView,
-    QuestionAnswerViewSet,
-    QuestionSearchAPIView,
-    SimpleQuestionTreeViewSet,
+    SyncAPIContentView,
     UploadedDocumentViewSet,
     UserViewSet,
 )
 
 router = DefaultRouter()
 router.register("users", UserViewSet, basename="user")
-router.register("questions", QuestionAnswerViewSet, basename="question")
-router.register("question-tree", SimpleQuestionTreeViewSet, basename="question-tree")
-router.register("languages", AvailableLanguageViewSet, basename="language")
 router.register("documents", UploadedDocumentViewSet, basename="document")
 
 urlpatterns = [
@@ -29,8 +21,6 @@ urlpatterns = [
     path("auth/verify/", TokenVerifyView.as_view(), name="token_verify"),
     path("chat/", ChatAPIView.as_view(), name="chat"),
     path("chat/feedback/", ChatFeedbackAPIView.as_view(), name="chat-feedback"),
-    path("search/", QuestionSearchAPIView.as_view(), name="search"),
-    path("analytics/", AnalyticsAPIView.as_view(), name="analytics"),
-    path("imports/excel/", ExcelImportView.as_view(), name="import-excel"),
+    path("sync-api-content/", SyncAPIContentView.as_view(), name="sync-api-content"),
     path("", include(router.urls)),
 ]
