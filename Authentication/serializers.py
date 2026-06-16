@@ -19,6 +19,7 @@ def run_password_validation(password, *, user=None, field="password"):
 
 class UserSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
+    api_key = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -29,13 +30,21 @@ class UserSerializer(serializers.ModelSerializer):
             "first_name",
             "last_name",
             "role",
+            "api_key",
             "is_active",
             "date_joined",
         ]
-        read_only_fields = ["id", "role", "date_joined"]
+        read_only_fields = ["id", "role", "api_key", "date_joined"]
 
     def get_role(self, obj):
         return "admin" if obj.is_staff else "user"
+
+    def get_api_key(self, obj):
+        """The user's API key string (null if one hasn't been issued yet)."""
+        try:
+            return obj.api_key.key
+        except APIKey.DoesNotExist:
+            return None
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):

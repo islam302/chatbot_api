@@ -31,7 +31,9 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.all()
+    # select_related the api_key so the serializer doesn't issue an extra query
+    # per user when listing.
+    queryset = User.objects.select_related("api_key").all()
     serializer_class = UserSerializer
     authentication_classes = ACCOUNT_AUTH
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
