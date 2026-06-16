@@ -3,16 +3,18 @@ import logging
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
 from rest_framework import filters, permissions, status, viewsets
-from rest_framework.authentication import TokenAuthentication
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from ..auth import APIKeyAuthentication
+from Authentication.authentication import APIKeyAuthentication
 from ..filters import UploadedDocumentFilter
 from ..models import DocumentStatus, UploadedDocument
 from ..serializers import UploadedDocumentSerializer, UploadedDocumentWriteSerializer
-from ..services.chunking import ingest_document
+from ..services import quota
+from ..services.ingestion import dispatch_ingestion
+from ..services.word_import import import_document_from_word
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +22,7 @@ logger = logging.getLogger(__name__)
 class UploadedDocumentViewSet(viewsets.ModelViewSet):
     queryset = UploadedDocument.objects.all()
     serializer_class = UploadedDocumentSerializer
-    authentication_classes = [APIKeyAuthentication, TokenAuthentication]
+    authentication_classes = [APIKeyAuthentication, JWTAuthentication]
     permission_classes = [permissions.IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -37,13 +39,22 @@ class UploadedDocumentViewSet(viewsets.ModelViewSet):
             return UploadedDocumentWriteSerializer
         return UploadedDocumentSerializer
 
+    def create(self, request, *args, **kwargs):
+        # Enforce the tenant's document-count / total-size quota before ingesting.
+        incoming = request.FILES.get("file")
+        try:
+            quota.check_document_quota(request.user, incoming.size if incoming else 0)
+        except quota.QuotaError as exc:
+            return Response({"detail": exc.message}, status=exc.status_code)
+        return super().create(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         instance = serializer.save(
             uploaded_by=self.request.user,
             processing_status=DocumentStatus.PENDING,
         )
         try:
-            ingest_document(instance)
+            dispatch_ingestion(instance)
         except Exception:
             # Status/error already persisted by ingest_document.
             logger.exception("Document ingestion failed for %s", instance.id)
@@ -55,17 +66,60 @@ class UploadedDocumentViewSet(viewsets.ModelViewSet):
         """Force re-chunking and re-embedding of an existing document."""
         instance = self.get_object()
         try:
-            result = ingest_document(instance)
+            result = dispatch_ingestion(instance)
         except Exception as exc:
             return Response(
                 {"detail": str(exc)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
         instance.refresh_from_db()
+        payload = UploadedDocumentSerializer(instance).data
+        if result is not None:
+            payload["chunks_created"] = result.chunks_created
+        return Response(payload, status=status.HTTP_202_ACCEPTED)
+
+    @extend_schema(
+        request={
+            "multipart/form-data": {
+                "type": "object",
+                "properties": {"file": {"type": "string", "format": "binary"}},
+                "required": ["file"],
+            }
+        },
+        responses={201: UploadedDocumentSerializer},
+    )
+    @action(detail=False, methods=["post"], url_path="upload-word")
+    def upload_word(self, request):
+        """Add knowledge by uploading a Word (.docx) file.
+
+        Creates a document, then parses, chunks, and embeds it so the
+        content is immediately searchable by the chat pipeline.
+        """
+        uploaded = request.FILES.get("file")
+        if uploaded is None:
+            return Response(
+                {"detail": "A 'file' field is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            quota.check_document_quota(request.user, uploaded.size)
+        except quota.QuotaError as exc:
+            return Response({"detail": exc.message}, status=exc.status_code)
+        try:
+            result = import_document_from_word(uploaded, uploaded_by=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            logger.exception("Word upload ingestion failed")
+            return Response(
+                {"detail": f"Failed to ingest Word file: {exc}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
         return Response(
             {
-                **UploadedDocumentSerializer(instance).data,
+                **UploadedDocumentSerializer(result.document).data,
                 "chunks_created": result.chunks_created,
             },
-            status=status.HTTP_202_ACCEPTED,
+            status=status.HTTP_201_CREATED,
         )

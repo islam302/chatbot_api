@@ -1,19 +1,9 @@
-import binascii
-import os
 import uuid
 
-from django.contrib.auth.models import AbstractUser
 from django.conf import settings
 from django.db import models
 
-
-class User(AbstractUser):
-    """Custom User model with UUID primary key."""
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-
-    class Meta:
-        db_table = "auth_user"
+# User and APIKey now live in the `Authentication` app.
 
 
 class TimestampedModel(models.Model):
@@ -103,10 +93,17 @@ class DocumentChunk(TimestampedModel, EmbeddingMixin):
     position = models.PositiveIntegerField(default=0)
     content = models.TextField()
     metadata = models.JSONField(default=dict, blank=True)
+    # Incremental sync: stable id of the source record (API item / row) and a
+    # hash of that record's content, so re-syncs only re-embed what changed.
+    source_id = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    content_hash = models.CharField(max_length=64, blank=True, default="", db_index=True)
 
     class Meta:
         ordering = ["document_id", "position"]
-        indexes = [models.Index(fields=["document", "position"])]
+        indexes = [
+            models.Index(fields=["document", "position"]),
+            models.Index(fields=["document", "source_id"]),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["document", "position"], name="unique_chunk_position"
@@ -156,31 +153,107 @@ class ChatFeedback(TimestampedModel):
         return f"{self.rating} {self.question[:40]}"
 
 
-class APIKey(TimestampedModel):
-    """Per-user API key for authentication and multi-tenancy."""
+class BotTone(models.TextChoices):
+    FRIENDLY = "friendly", "Friendly"
+    FORMAL = "formal", "Formal"
+    CONCISE = "concise", "Concise"
+
+
+class ChatbotConfig(TimestampedModel):
+    """Per-user chatbot identity + retrieval settings.
+
+    Identity fields (name/company/language/tone) are injected into a
+    system-controlled prompt; the strict grounding rules themselves are NOT
+    user-editable, so every tenant's bot answers only from its own data.
+    """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="api_key",
+        related_name="chatbot_config",
     )
-    key = models.CharField(max_length=40, unique=True, db_index=True)
-    is_active = models.BooleanField(default=True)
-    last_used_at = models.DateTimeField(null=True, blank=True)
+    assistant_name = models.CharField(max_length=100, blank=True, default="Assistant")
+    company_name = models.CharField(max_length=150, blank=True, default="")
+    # "auto" = reply in the user's language; otherwise a fallback language code.
+    default_language = models.CharField(max_length=10, blank=True, default="auto")
+    tone = models.CharField(max_length=20, choices=BotTone.choices, default=BotTone.FRIENDLY)
+    # When True (default), the bot never answers outside the retrieved context.
+    strict_grounding = models.BooleanField(default=True)
+    # Optional static reply when nothing matches the user's data. Blank => the
+    # LLM produces a localized "I don't have that" handoff (still grounded).
+    no_answer_message = models.TextField(blank=True, default="")
+    # Optional per-bot retrieval overrides (fall back to global settings if null).
+    top_k = models.PositiveIntegerField(null=True, blank=True)
+    similarity_threshold = models.FloatField(null=True, blank=True)
+
+    def __str__(self):
+        return f"ChatbotConfig({self.user.username})"
+
+
+class TenantQuota(TimestampedModel):
+    """Per-tenant resource limits. A tenant is a User.
+
+    Any field left null falls back to the global default in settings, so a row
+    only needs to override what differs for that tenant. Enforced in
+    services/quota.py at upload time (documents/size) and chat time (rate limit,
+    monthly token cap).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="quota",
+    )
+    max_documents = models.PositiveIntegerField(null=True, blank=True)
+    max_total_mb = models.FloatField(null=True, blank=True)
+    max_requests_per_min = models.PositiveIntegerField(null=True, blank=True)
+    # Monthly input+output token budget. null/0 = unlimited.
+    monthly_token_cap = models.PositiveBigIntegerField(null=True, blank=True)
+    # Hard stop: a suspended tenant cannot upload or chat.
+    is_suspended = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"TenantQuota({self.user.username})"
+
+
+class UsageKind(models.TextChoices):
+    CHAT = "chat", "Chat"
+    EMBEDDING = "embedding", "Embedding"
+
+
+class UsageRecord(TimestampedModel):
+    """One metered event (a chat answer) for a tenant — feeds analytics/billing.
+
+    Stores token counts, estimated cost, latency and retrieval confidence. The
+    question text is intentionally NOT stored here (privacy); ChatFeedback keeps
+    text when the user opts to rate an answer.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="usage_records",
+    )
+    kind = models.CharField(max_length=16, choices=UsageKind.choices, default=UsageKind.CHAT)
+    model = models.CharField(max_length=64, blank=True, default="")
+    tokens_in = models.PositiveIntegerField(default=0)
+    tokens_out = models.PositiveIntegerField(default=0)
+    cost_usd = models.FloatField(default=0.0)
+    response_time_ms = models.PositiveIntegerField(default=0)
+    confident = models.BooleanField(default=True)
+    chunk_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ["-created_at"]
-        indexes = [models.Index(fields=["key", "is_active"])]
-
-    def save(self, *args, **kwargs):
-        if not self.key:
-            self.key = self.generate_key()
-        return super().save(*args, **kwargs)
-
-    @staticmethod
-    def generate_key():
-        return binascii.hexlify(os.urandom(20)).decode()
+        indexes = [
+            models.Index(fields=["user", "created_at"]),
+            models.Index(fields=["user", "kind", "created_at"]),
+        ]
 
     def __str__(self):
-        return f"{self.user.username} - {self.key[:8]}..."
+        return f"Usage({self.user_id} {self.kind} {self.tokens_in}+{self.tokens_out})"

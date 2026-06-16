@@ -13,11 +13,19 @@ python-dotenv>=1.0,<2.0
 # Production server
 gunicorn>=23.0,<24.0
 
+# Background jobs (Celery + Redis broker/result backend)
+celery>=5.4,<6.0
+redis>=5.0,<6.0
+
 # Database (PostgreSQL — optional if using SQLite)
 psycopg2-binary>=2.9,<3.0
 
 # Vector math (in-DB JSON embeddings + numpy cosine)
 numpy>=1.26,<3.0
+
+# Optional: pgvector backend for scale (PostgreSQL only).
+# Enable with `python manage.py setup_pgvector` + RAG_VECTOR_BACKEND=pgvector.
+pgvector>=0.3,<1.0
 
 # LLM providers (install only what you use)
 openai>=1.40,<2.0

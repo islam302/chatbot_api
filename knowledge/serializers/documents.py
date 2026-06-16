@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from ..models import UploadedDocument
+from ..services.uploads import validate_upload_size
 
 
 class UploadedDocumentSerializer(serializers.ModelSerializer):
@@ -50,6 +51,13 @@ class UploadedDocumentWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = UploadedDocument
         fields = ["file", "is_active"]
+
+    def validate_file(self, file):
+        try:
+            validate_upload_size(file)
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+        return file
 
     def create(self, validated_data):
         file = validated_data["file"]

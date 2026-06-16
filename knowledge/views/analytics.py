@@ -1,48 +1,100 @@
-from django.db.models import Count
+"""Per-tenant usage analytics.
+
+``GET /api/v1/analytics/usage/``
+  Returns the authenticated tenant's own rollup (totals, this-month, today) plus
+  live quota consumption (documents/storage used vs. their limits).
+
+``GET /api/v1/analytics/usage/?scope=all``  (admin only)
+  Returns a per-tenant summary across all tenants.
+"""
+
+from __future__ import annotations
+
+from django.contrib.auth import get_user_model
+from django.db.models import Avg, Count, Q, Sum
+from django.utils import timezone
 from drf_spectacular.utils import extend_schema
-from rest_framework import permissions
+from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from ..models import (
-    ChatFeedback,
-    DocumentChunk,
-    QuestionAnswer,
-    SimpleQuestionTree,
-    UploadedDocument,
-)
-from ..serializers import AnalyticsSerializer
+from Authentication.authentication import APIKeyAuthentication
+from ..models import UsageRecord
+from ..services import quota
+
+User = get_user_model()
 
 
-class AnalyticsAPIView(APIView):
+def _rollup(qs) -> dict:
+    agg = qs.aggregate(
+        requests=Count("id"),
+        tokens_in=Sum("tokens_in"),
+        tokens_out=Sum("tokens_out"),
+        cost=Sum("cost_usd"),
+        avg_ms=Avg("response_time_ms"),
+        confident=Count("id", filter=Q(confident=True)),
+    )
+    requests = agg["requests"] or 0
+    confident = agg["confident"] or 0
+    return {
+        "requests": requests,
+        "tokens_in": agg["tokens_in"] or 0,
+        "tokens_out": agg["tokens_out"] or 0,
+        "total_tokens": (agg["tokens_in"] or 0) + (agg["tokens_out"] or 0),
+        "cost_usd": round(agg["cost"] or 0.0, 4),
+        "avg_response_ms": round(agg["avg_ms"] or 0.0, 1),
+        "confident_rate": round(confident / requests, 3) if requests else 0.0,
+    }
+
+
+def _tenant_payload(user) -> dict:
+    now = timezone.now()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    base = UsageRecord.objects.filter(user=user)
+    limits = quota.effective_limits(user)
+    doc_count, used_mb = quota.document_usage(user)
+
+    return {
+        "tenant": {"id": str(user.id), "username": user.username},
+        "totals": _rollup(base),
+        "this_month": _rollup(base.filter(created_at__gte=month_start)),
+        "today": _rollup(base.filter(created_at__gte=day_start)),
+        "quota": {
+            "documents_used": doc_count,
+            "max_documents": limits.max_documents,
+            "storage_mb_used": round(used_mb, 2),
+            "max_total_mb": limits.max_total_mb,
+            "tokens_this_month": quota.tokens_used_this_month(user),
+            "monthly_token_cap": limits.monthly_token_cap,  # 0 = unlimited
+            "max_requests_per_min": limits.max_requests_per_min,
+            "is_suspended": limits.is_suspended,
+        },
+    }
+
+
+class UsageAnalyticsView(APIView):
+    """Usage + quota analytics for the authenticated tenant (or all, for admins)."""
+
+    authentication_classes = [APIKeyAuthentication, JWTAuthentication]
     permission_classes = [permissions.IsAuthenticated]
 
-    @extend_schema(responses={200: AnalyticsSerializer})
+    @extend_schema(responses={200: dict})
     def get(self, request):
-        most_asked = list(
-            QuestionAnswer.objects.order_by("-count")[:10].values("id", "question", "count")
-        )
-        for item in most_asked:
-            item["id"] = str(item["id"])
+        scope = request.query_params.get("scope", "self")
 
-        language_distribution = dict(
-            SimpleQuestionTree.objects.values_list("language")
-            .annotate(c=Count("id"))
-            .values_list("language", "c")
-        )
+        if scope == "all":
+            if not (request.user.is_staff or request.user.is_superuser):
+                return Response(
+                    {"detail": "Admin access required for scope=all."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            tenants = User.objects.filter(usage_records__isnull=False).distinct()
+            return Response(
+                {"tenants": [_tenant_payload(u) for u in tenants]},
+                status=status.HTTP_200_OK,
+            )
 
-        feedback_summary = dict(
-            ChatFeedback.objects.values_list("rating")
-            .annotate(c=Count("id"))
-            .values_list("rating", "c")
-        )
-
-        payload = {
-            "total_questions": QuestionAnswer.objects.count(),
-            "total_documents": UploadedDocument.objects.count(),
-            "total_chunks": DocumentChunk.objects.count(),
-            "most_asked_questions": most_asked,
-            "language_distribution": language_distribution,
-            "feedback_summary": feedback_summary,
-        }
-        return Response(AnalyticsSerializer(payload).data)
+        return Response(_tenant_payload(request.user), status=status.HTTP_200_OK)

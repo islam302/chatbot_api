@@ -3,11 +3,11 @@ import logging
 import requests
 from drf_spectacular.utils import extend_schema
 from rest_framework import permissions, status
-from rest_framework.authentication import TokenAuthentication
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from ..auth import APIKeyAuthentication
+from Authentication.authentication import APIKeyAuthentication
 from ..models import DocumentStatus, UploadedDocument
 from ..services.api_content_processor import APIContentRAGProcessor, APIContentProcessingError
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class SyncAPIContentView(APIView):
     """Ingest content from external API into RAG system."""
 
-    authentication_classes = [APIKeyAuthentication, TokenAuthentication]
+    authentication_classes = [APIKeyAuthentication, JWTAuthentication]
     permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
@@ -78,21 +78,20 @@ class SyncAPIContentView(APIView):
             logger.info(f"Fetched {len(items)} items from API")
 
             # Process for RAG
+            full_refresh = str(request.data.get("full_refresh", "")).lower() in {
+                "1", "true", "yes", "on"
+            }
+
             processor = APIContentRAGProcessor(
                 document_name=document_name,
                 user=request.user,
                 api_url=api_url,
                 items_key=items_key,
             )
-            stats = processor.process_items(items)
+            stats = processor.process_items(items, full_refresh=full_refresh)
 
             return Response(
-                {
-                    "status": "success",
-                    "processed": stats["processed"],
-                    "chunks_created": stats["chunks_created"],
-                    "errors": stats["errors"],
-                },
+                {"status": "success", **stats},
                 status=status.HTTP_200_OK,
             )
 

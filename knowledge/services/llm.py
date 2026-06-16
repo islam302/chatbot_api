@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import threading
+from dataclasses import dataclass
 from typing import Protocol
 
 
@@ -15,10 +16,24 @@ class LLMError(RuntimeError):
     pass
 
 
+@dataclass
+class LLMResult:
+    """An LLM completion plus the token usage reported by the provider."""
+
+    text: str
+    model: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+
 class LLMBackend(Protocol):
     model: str
 
     def complete(self, system: str, user: str, *, temperature: float = 0) -> str: ...
+
+    def complete_with_usage(
+        self, system: str, user: str, *, temperature: float = 0
+    ) -> LLMResult: ...
 
 
 class OpenAIBackend:
@@ -35,6 +50,11 @@ class OpenAIBackend:
         self.model = model or os.getenv("LLM_MODEL", "gpt-4o")
 
     def complete(self, system: str, user: str, *, temperature: float = 0) -> str:
+        return self.complete_with_usage(system, user, temperature=temperature).text
+
+    def complete_with_usage(
+        self, system: str, user: str, *, temperature: float = 0
+    ) -> LLMResult:
         response = self._client.chat.completions.create(
             model=self.model,
             temperature=temperature,
@@ -43,7 +63,13 @@ class OpenAIBackend:
                 {"role": "user", "content": user},
             ],
         )
-        return response.choices[0].message.content or ""
+        usage = getattr(response, "usage", None)
+        return LLMResult(
+            text=response.choices[0].message.content or "",
+            model=self.model,
+            prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+            completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+        )
 
 
 class AnthropicBackend:
@@ -60,6 +86,11 @@ class AnthropicBackend:
         self.model = model or os.getenv("LLM_MODEL", "claude-sonnet-4-6")
 
     def complete(self, system: str, user: str, *, temperature: float = 0) -> str:
+        return self.complete_with_usage(system, user, temperature=temperature).text
+
+    def complete_with_usage(
+        self, system: str, user: str, *, temperature: float = 0
+    ) -> LLMResult:
         response = self._client.messages.create(
             model=self.model,
             max_tokens=2048,
@@ -67,9 +98,16 @@ class AnthropicBackend:
             system=system,
             messages=[{"role": "user", "content": user}],
         )
+        usage = getattr(response, "usage", None)
         # Concatenate any text blocks in the response
-        return "".join(
+        text = "".join(
             block.text for block in response.content if getattr(block, "type", "") == "text"
+        )
+        return LLMResult(
+            text=text,
+            model=self.model,
+            prompt_tokens=getattr(usage, "input_tokens", 0) or 0,
+            completion_tokens=getattr(usage, "output_tokens", 0) or 0,
         )
 
 

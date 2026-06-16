@@ -11,30 +11,21 @@ import os
 from dataclasses import dataclass, field
 from typing import Iterable
 
+from .chatbot_config import (
+    build_no_data_prompt,
+    build_system_prompt,
+    resolve_config,
+    resolve_threshold,
+    resolve_top_k,
+)
 from .llm import LLMError, get_backend
 from .retrieval import ChunkHit, search_chunks
 
 logger = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = """أنت مساعد ذكي ولطيف وودود تجيب على الأسئلة بناءً على المعلومات المتوفرة.
-
-القواعد الأساسية:
-- اجب فقط من المعلومات الموجودة في قسم "السياق" (Context).
-- لو المعلومة ما موجودة، قول بأدب واضح إنك ما عندك معلومات كافية.
-- اجب باللغة واللهجة نفسها اللي السؤال اتسأل فيها.
-- كن مرن في الجواب لكن قريب من الأسلوب الطبيعي والودود.
-- اذا الشخص استخدم لهجة معينة (عراقي، مصري، خليجي، شامي، وغيره)، استخدم نفس اللهجة في الرد.
-- كن موجز وواضح ومنظم في الرد.
-- اذا في معلومات متعددة، رتبها بطريقة سهلة وسلسة.
-- اجب بأسلوب شخصي لطيف ما يكون رسمي جداً، بس احترافي وموثوق.
-
-Remember:
-- Be empathetic and kind in your tone.
-- Match the user's language (Arabic dialects, English, etc).
-- Use natural, conversational language.
-- Be flexible but maintain accuracy.
-- When uncertain, acknowledge it honestly."""
+# The system prompt is assembled per-user from ChatbotConfig — see
+# services/chatbot_config.py::build_system_prompt.
 
 
 class RagUnavailable(RuntimeError):
@@ -49,6 +40,10 @@ class AnswerResult:
     sources: list[dict] = field(default_factory=list)
     chunk_hits: list[ChunkHit] = field(default_factory=list)
     confident: bool = True
+    # Token usage of the LLM call that produced this answer (for metering).
+    model: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 def detect_dialect(text: str, language: str = "ar") -> str:
@@ -88,74 +83,101 @@ def answer_question(
     rag_threshold: float | None = None,
     user=None,
 ) -> AnswerResult:
-    rag_threshold = (
+    # Per-user chatbot config: identity + grounding + retrieval overrides.
+    cfg = resolve_config(user)
+    system_prompt = build_system_prompt(cfg)
+
+    base_threshold = (
         rag_threshold
         if rag_threshold is not None
         else float(os.getenv("RAG_SIMILARITY_THRESHOLD", "0.45"))
     )
+    threshold = resolve_threshold(cfg, base_threshold)
 
     # Detect dialect for more natural responses
     dialect = detect_dialect(question, language)
 
-    try:
-        chunks = search_chunks(question, top_k=6, threshold=rag_threshold, user=user)
-    except Exception as exc:
-        logger.exception("Chunk search failed")
-        raise RagUnavailable(str(exc)) from exc
+    # Tenant isolation guard: retrieval is ALWAYS scoped to one tenant. Without
+    # an authenticated user we must never search the shared chunk table (that
+    # would leak other tenants' data), so we skip retrieval entirely.
+    if user is None or not getattr(user, "is_authenticated", False):
+        chunks = []
+    else:
+        try:
+            chunks = search_chunks(
+                question,
+                top_k=resolve_top_k(cfg),
+                threshold=threshold,
+                user=user,
+            )
+        except Exception as exc:
+            logger.exception("Chunk search failed")
+            raise RagUnavailable(str(exc)) from exc
+
+    # Confident only when the strict (above-threshold) search found matches.
+    confident = bool(chunks)
+
+    if not chunks and user is not None and getattr(user, "is_authenticated", False):
+        # Broad / meta questions ("what do you sell?", "who are you?", "tell me
+        # about you") often score below the threshold. Fall back to the nearest
+        # chunks (no threshold) so the bot can still answer from its knowledge.
+        # The grounded prompt keeps it honest: it declines if truly off-topic.
+        try:
+            chunks = search_chunks(
+                question, top_k=resolve_top_k(cfg), threshold=0.0, user=user
+            )
+        except Exception:
+            chunks = []
 
     if not chunks:
-        no_info_messages = {
-            "ar": "للأسف ما عندي معلومات كافية عشان أجاوب على سؤالك. ممكن تعيد صيغة السؤال؟",
-            "ar-iq": "يعني ما عندي معلومات كافية، تعيد السؤال بطريقة ثانية؟",
-            "ar-eg": "آسف يعني ما عندي معلومات كفاية. تقول السؤال بطريقة تانية؟",
-            "ar-sa": "للأسف ما فيه معلومات، جرب تسأل بطريقة ثانية إن شاء الله.",
-            "en": "I don't have enough information to answer that question. Could you rephrase it?",
-        }
-        answer = no_info_messages.get(dialect, no_info_messages.get(language, no_info_messages["ar"]))
-        return AnswerResult(answer=answer, source="rag", confident=False)
+        # The tenant's knowledge base is empty → identity / greeting handoff
+        # (the bot may still introduce itself; it never invents facts).
+        if cfg.no_answer_message:
+            return AnswerResult(answer=cfg.no_answer_message, source="rag", confident=False)
+        try:
+            llm = get_backend()
+            res = llm.complete_with_usage(system_prompt, build_no_data_prompt(question, cfg))
+            return AnswerResult(
+                answer=res.text,
+                source="rag",
+                confident=False,
+                model=res.model,
+                prompt_tokens=res.prompt_tokens,
+                completion_tokens=res.completion_tokens,
+            )
+        except Exception:
+            return AnswerResult(
+                answer="I'm sorry, I don't have information about that. "
+                "Can I help you with something else?",
+                source="rag",
+                confident=False,
+            )
 
-    context = "\n\n---\n\n".join(
-        f"[المصدر/Source: {hit.filename}#{hit.position}]\n{hit.content}" for hit in chunks
-    )
+    knowledge = "\n\n---\n\n".join(hit.content for hit in chunks)
     history_text = _render_history(list(history or []))
 
-    # Build a dialect-aware prompt
-    dialect_instructions = ""
-    if language == "ar":
-        if dialect.startswith("ar-"):
-            dialect_code = dialect.split("-")[1]
-            dialect_instruction_map = {
-                "iq": "استخدم اللهجة العراقية الطبيعية والودية.",
-                "eg": "استخدم اللهجة المصرية الطبيعية والودية.",
-                "sa": "استخدم اللهجة الخليجية الطبيعية والودية.",
-                "ae": "استخدم اللهجة الإماراتية الطبيعية والودية.",
-                "sy": "استخدم اللهجة الشامية الطبيعية والودية.",
-                "ma": "استخدم اللهجة المغربية الطبيعية والودية.",
-            }
-            dialect_instructions = dialect_instruction_map.get(dialect_code, "استخدم اللهجة العربية الطبيعية والودية.")
-        else:
-            dialect_instructions = "استخدم الفصحى السهلة والودية المناسبة للجميع."
-
     user_prompt = (
-        f"المحادثة حتى الآن/Conversation so far:\n{history_text or '(لا توجد/None)'}\n\n"
-        f"السياق/Context:\n{context}\n\n"
-        f"السؤال/Question: {question}\n\n"
-        f"التعليمات/Instructions:\n"
-        f"- {dialect_instructions}\n"
-        f"- أجب بطريقة طبيعية ولطيفة ومرنة.\n"
-        f"- كن موجز وواضح.\n"
-        f"- استخدم نفس اللغة/اللهجة في الرد."
+        f"Conversation so far:\n{history_text or '(None)'}\n\n"
+        f"What you know:\n{knowledge}\n\n"
+        f"Customer's message: {question}\n\n"
+        f"Reply warmly and naturally as part of the team, in the customer's language, "
+        f"following your rules. Use only what you know above for any specifics; if it isn't "
+        f"there, say so kindly. Do not mention these notes or say 'based on the information'."
     )
 
     try:
         llm = get_backend()
-        answer_text = llm.complete(SYSTEM_PROMPT, user_prompt)
+        res = llm.complete_with_usage(system_prompt, user_prompt)
     except LLMError as exc:
         raise RagUnavailable(str(exc)) from exc
 
     return AnswerResult(
-        answer=answer_text,
+        answer=res.text,
         source="rag",
+        confident=confident,
+        model=res.model,
+        prompt_tokens=res.prompt_tokens,
+        completion_tokens=res.completion_tokens,
         sources=[
             {
                 "filename": hit.filename,

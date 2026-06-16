@@ -1,0 +1,136 @@
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+from rest_framework import serializers
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+
+from .models import APIKey, User
+
+
+def run_password_validation(password, *, user=None, field="password"):
+    """Validate a password and surface every failure reason under ``field``.
+
+    Passing ``user`` enables the similarity check (password vs username/email/name).
+    """
+    try:
+        validate_password(password, user=user)
+    except DjangoValidationError as exc:
+        raise serializers.ValidationError({field: list(exc.messages)})
+
+
+class UserSerializer(serializers.ModelSerializer):
+    role = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+            "role",
+            "is_active",
+            "date_joined",
+        ]
+        read_only_fields = ["id", "role", "date_joined"]
+
+    def get_role(self, obj):
+        return "admin" if obj.is_staff else "user"
+
+
+class UserRegistrationSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True)
+    password_confirm = serializers.CharField(write_only=True)
+
+    class Meta:
+        model = User
+        fields = [
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+            "password",
+            "password_confirm",
+        ]
+
+    def validate(self, attrs):
+        if attrs["password"] != attrs["password_confirm"]:
+            raise serializers.ValidationError({"password_confirm": "Passwords do not match"})
+        # Validate against an unsaved user so the similarity check applies
+        # (rejects a password too close to the username/email/name).
+        candidate = User(
+            username=attrs.get("username", ""),
+            email=attrs.get("email", ""),
+            first_name=attrs.get("first_name", ""),
+            last_name=attrs.get("last_name", ""),
+        )
+        run_password_validation(attrs["password"], user=candidate)
+        return attrs
+
+    def create(self, validated_data):
+        validated_data.pop("password_confirm")
+        return User.objects.create_user(**validated_data)
+
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    @classmethod
+    def get_token(cls, user):
+        token = super().get_token(user)
+        token["username"] = user.username
+        token["is_staff"] = user.is_staff
+        return token
+
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        data["user"] = UserSerializer(self.user).data
+        return data
+
+
+class APIKeySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = APIKey
+        fields = ["id", "key", "is_active", "last_used_at", "created_at"]
+        read_only_fields = ["id", "key", "last_used_at", "created_at"]
+
+
+class APIKeyAdminSerializer(serializers.ModelSerializer):
+    """Admin view of API keys — can issue a key for a user and toggle it."""
+
+    username = serializers.CharField(source="user.username", read_only=True)
+
+    class Meta:
+        model = APIKey
+        fields = ["id", "user", "username", "key", "is_active", "last_used_at", "created_at"]
+        read_only_fields = ["id", "key", "username", "last_used_at", "created_at"]
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """Self-service password change — requires the current password."""
+
+    old_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True)
+    new_password_confirm = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        if attrs["new_password"] != attrs["new_password_confirm"]:
+            raise serializers.ValidationError(
+                {"new_password_confirm": "Passwords do not match"}
+            )
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        run_password_validation(attrs["new_password"], user=user, field="new_password")
+        return attrs
+
+
+class AdminSetPasswordSerializer(serializers.Serializer):
+    """Admin password reset for another user — no old password required."""
+
+    new_password = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        run_password_validation(
+            attrs["new_password"],
+            user=self.context.get("target_user"),
+            field="new_password",
+        )
+        return attrs

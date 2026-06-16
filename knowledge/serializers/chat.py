@@ -1,3 +1,4 @@
+from django.conf import settings
 from rest_framework import serializers
 
 from ..models import AnswerSource, ChatFeedback
@@ -11,7 +12,19 @@ class ChatMessageSerializer(serializers.Serializer):
 class ChatRequestSerializer(serializers.Serializer):
     question = serializers.CharField(max_length=2000)
     history = ChatMessageSerializer(many=True, required=False, default=list)
-    language = serializers.CharField(max_length=8, default="ar")
+    # Optional: when omitted/blank, the server detects the language from the question.
+    language = serializers.CharField(max_length=8, required=False, allow_blank=True, default="")
+
+    def validate_history(self, value):
+        # 1 turn = a user message + the assistant's reply (2 messages).
+        turns = int(getattr(settings, "CHAT_MAX_HISTORY_TURNS", 10))
+        max_messages = turns * 2
+        if len(value) > max_messages:
+            raise serializers.ValidationError(
+                f"History too long: keep the last {turns} exchanges "
+                f"(at most {max_messages} messages)."
+            )
+        return value
 
 
 class ChatResponseSerializer(serializers.Serializer):
@@ -21,6 +34,9 @@ class ChatResponseSerializer(serializers.Serializer):
     sources = serializers.ListField(child=serializers.DictField(), required=False)
     confident = serializers.BooleanField(default=True)
     response_time_ms = serializers.IntegerField(required=False)
+    prompt_tokens = serializers.IntegerField(required=False)
+    completion_tokens = serializers.IntegerField(required=False)
+    cost_usd = serializers.FloatField(required=False)
 
 
 class ChatFeedbackSerializer(serializers.ModelSerializer):
