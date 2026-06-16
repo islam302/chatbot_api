@@ -215,6 +215,13 @@ class APIContentRAGProcessor:
                     DocumentChunk.objects.bulk_create(new_chunks)
                 stats.chunks_created = len(new_chunks)
 
+            # Mirror new JSON embeddings into the pgvector column so they're
+            # searchable right away (no-op unless RAG_VECTOR_BACKEND=pgvector).
+            if stats.chunks_created:
+                from .vector_store import backfill_vectors_for_document
+
+                backfill_vectors_for_document(self.api_document.id)
+
             logger.info("API sync completed for %s: %s", self.document_name, stats.as_dict())
             return stats.as_dict()
 

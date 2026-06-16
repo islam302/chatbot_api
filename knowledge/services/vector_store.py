@@ -166,6 +166,40 @@ class VectorBackendUnavailable(RuntimeError):
     pass
 
 
+def backfill_vectors_for_document(document_id) -> int:
+    """Populate ``embedding_vec`` from the JSON ``embedding`` for one document.
+
+    Called right after ingestion so freshly uploaded chunks are immediately
+    searchable by the pgvector backend (otherwise ``embedding_vec`` stays NULL
+    and the chunks are invisible until ``setup_pgvector`` is re-run).
+
+    No-op unless the pgvector backend is active on PostgreSQL. Safe if the
+    column doesn't exist yet — it just logs and skips (numpy fallback still
+    serves search in that case).
+    """
+    if getattr(settings, "RAG_VECTOR_BACKEND", "numpy") != "pgvector":
+        return 0
+    if connection.vendor != "postgresql":
+        return 0
+
+    table = DocumentChunk._meta.db_table
+    col = PgVectorStore.COLUMN
+    sql = (
+        f"UPDATE {table} SET {col} = embedding::text::vector "
+        f"WHERE document_id = %s AND {col} IS NULL AND embedding IS NOT NULL"
+    )
+    try:
+        with transaction.atomic():
+            with connection.cursor() as cur:
+                cur.execute(sql, [str(document_id)])
+                updated = cur.rowcount
+        logger.info("Backfilled embedding_vec for %d chunks of document %s", updated, document_id)
+        return updated
+    except Exception as exc:  # column/extension missing, dim mismatch, etc.
+        logger.warning("embedding_vec backfill skipped for %s: %s", document_id, exc)
+        return 0
+
+
 def get_backend():
     name = getattr(settings, "RAG_VECTOR_BACKEND", "numpy")
     if name == "pgvector":

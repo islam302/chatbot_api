@@ -66,6 +66,13 @@ def ingest_document(document: UploadedDocument) -> IngestionResult:
 
         document.processing_status = DocumentStatus.COMPLETED
         document.save(update_fields=["processing_status", "updated_at"])
+
+        # Mirror the JSON embeddings into the pgvector column so the new chunks
+        # are searchable immediately (no-op unless RAG_VECTOR_BACKEND=pgvector).
+        from .vector_store import backfill_vectors_for_document
+
+        backfill_vectors_for_document(document.id)
+
         return IngestionResult(document_id=str(document.id), chunks_created=len(pieces))
 
     except Exception as exc:
