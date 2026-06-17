@@ -85,13 +85,21 @@ def build_system_prompt(cfg: ResolvedConfig) -> str:
             "name exactly as it appears in \"What you know\""
         )
 
+    base_lang = (
+        "Mirror the user's EXACT language AND dialect. If they write in a specific "
+        "dialect or colloquial style (e.g. Iraqi \"خيو/شلونك/اكو\", Egyptian "
+        "\"إزيك/عايز/فين\", Gulf, Levantine \"شو/هلق\", Moroccan), reply in that SAME "
+        "dialect with their everyday words and tone — do NOT switch to formal Modern "
+        "Standard Arabic unless they used it. The reply should feel like it's written by "
+        "someone who speaks their dialect natively."
+    )
     if cfg.default_language and cfg.default_language != "auto":
         lang_rule = (
-            f"Reply in the same language and dialect the user used. "
-            f"If that is unclear, default to '{cfg.default_language}'."
+            base_lang + f" If the language is genuinely unclear, default to "
+            f"'{cfg.default_language}'."
         )
     else:
-        lang_rule = "Reply in the same language and dialect the user used."
+        lang_rule = base_lang
 
     if cfg.strict_grounding:
         grounding = (
