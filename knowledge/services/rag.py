@@ -160,9 +160,11 @@ def answer_question(
         f"Conversation so far:\n{history_text or '(None)'}\n\n"
         f"What you know:\n{knowledge}\n\n"
         f"Customer's message: {question}\n\n"
-        f"Reply warmly and naturally as part of the team, in the customer's language, "
-        f"following your rules. Use only what you know above for any specifics; if it isn't "
-        f"there, say so kindly. Do not mention these notes or say 'based on the information'."
+        f"Reply warmly and naturally as part of the team, following your rules. Write your "
+        f"reply in the SAME language as the customer's message above — if it's English, "
+        f"answer in English even though the knowledge is in Arabic; if it's Arabic, answer in "
+        f"Arabic matching their dialect. Use only what you know above for any specifics; if it "
+        f"isn't there, say so kindly. Do not mention these notes or say 'based on the information'."
     )
 
     try:
