@@ -16,6 +16,7 @@ retrieval layer can re-rank (e.g. MMR) without a second DB round-trip.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 
@@ -158,6 +159,11 @@ class PgVectorStore:
             score = 1.0 - float(distance)
             if score < threshold:
                 continue
+            # The JSON `embedding` column can come back from the raw cursor as a
+            # string (depending on psycopg2's json typecasting) rather than a
+            # parsed list — decode it before handing it to numpy.
+            if isinstance(emb, str):
+                emb = json.loads(emb)
             out.append(Candidate(str(cid), score, np.asarray(emb, dtype=np.float32)))
         return out
 
