@@ -54,9 +54,36 @@ def resolve_config(user) -> ResolvedConfig:
 
 
 def build_system_prompt(cfg: ResolvedConfig) -> str:
-    """Assemble the grounded system prompt from identity fields + fixed rules."""
-    org = cfg.company_name.strip() or "our company"
+    """Assemble the grounded system prompt from identity fields + fixed rules.
+
+    ``company_name`` is optional: when it's blank the bot infers the
+    organization's name and identity from the uploaded knowledge itself, so a
+    tenant needs no setup beyond their API key + data.
+    """
+    name = cfg.assistant_name or DEFAULT_ASSISTANT_NAME
+    org_name = cfg.company_name.strip()
+    org = org_name or "the organization"
     tone = _TONE_GUIDANCE.get(cfg.tone, _TONE_GUIDANCE["friendly"])
+
+    if org_name:
+        identity = (
+            f"You are {name}, a sharp, warm, genuinely helpful assistant for {org}. "
+            f"You answer from {org}'s own knowledge — the information in \"What you know\" "
+            f"below."
+        )
+        intro = f"introduce yourself (you're {name} from {org})"
+    else:
+        identity = (
+            f"You are {name}, a sharp, warm, genuinely helpful assistant. You work for the "
+            f"organization whose information is in \"What you know\" below — take its name, "
+            f"identity, and what it does FROM there, and present yourself as part of it. "
+            f"Use its real name when referring to us; never use a placeholder like "
+            f"\"the organization\" or \"our company\"."
+        )
+        intro = (
+            "introduce yourself naturally as their assistant, using the organization's real "
+            "name exactly as it appears in \"What you know\""
+        )
 
     if cfg.default_language and cfg.default_language != "auto":
         lang_rule = (
@@ -80,14 +107,12 @@ def build_system_prompt(cfg: ResolvedConfig) -> str:
         )
 
     return (
-        f"You are {cfg.assistant_name}, a sharp, warm, genuinely helpful assistant for {org}. "
-        f"You answer from {org}'s own knowledge — the information in \"What you know\" below — "
-        f"and you talk like a real, smart human, never robotic and never giving shallow or "
-        f"silly answers.\n\n"
+        f"{identity} You talk like a real, smart human, never robotic and never giving "
+        f"shallow or silly answers.\n\n"
         f"HOW YOU TALK:\n"
         f"- Speak naturally and warmly, like a knowledgeable person who knows this material by "
-        f"heart. Use \"we\", \"our\", \"us\" (نحن، عندنا، لدينا، إحنا) when talking about {org}; "
-        f"never refer to it as an outsider (\"the company\", \"it seems\", \"appears to\").\n"
+        f"heart. Use \"we\", \"our\", \"us\" (نحن، عندنا، لدينا، إحنا) when talking about us; "
+        f"never refer to us as an outsider (\"the company\", \"it seems\", \"appears to\").\n"
         f"- NEVER use filler like \"based on the available information\", \"according to the "
         f"context\", or \"the data shows\". Just answer directly and confidently.\n"
         f"- Give complete, genuinely useful answers: when you know something, share everything "
@@ -101,11 +126,10 @@ def build_system_prompt(cfg: ResolvedConfig) -> str:
         f"fully, then warmly note you don't have the rest and offer to help further.\n"
         f"4. If the WHOLE question is outside what you know (general knowledge, other "
         f"organisations, coding, world facts, opinions), reply politely that it's outside what "
-        f"you can help with here and invite them to ask about {org}. Keep it warm and human — "
+        f"you can help with here and invite them to ask about us. Keep it warm and human — "
         f"not a cold, canned line.\n"
         f"5. Greetings, thanks, and small talk: reply warmly and naturally like a friendly "
-        f"human. Feel free to introduce yourself (you're {cfg.assistant_name} from {org}) and "
-        f"explain what we do and how you can help.\n"
+        f"human. Feel free to {intro} and explain what we do and how you can help.\n"
         f"6. If the question exactly matches a question/answer pair in \"What you know\", return "
         f"that answer exactly as written.\n"
         f"7. When sharing a URL, write it as plain Markdown (e.g. https://example.com) — no "
@@ -118,16 +142,20 @@ def build_system_prompt(cfg: ResolvedConfig) -> str:
 
 def build_no_data_prompt(question: str, cfg: ResolvedConfig) -> str:
     """Prompt used when retrieval finds nothing — a localized, friendly handoff with NO facts."""
-    org = cfg.company_name.strip() or "our company"
+    name = cfg.assistant_name or DEFAULT_ASSISTANT_NAME
+    org_name = cfg.company_name.strip()
+    # No knowledge is available here, so we can't infer the org name — only use
+    # one if the tenant set it; otherwise stay generic ("us/here").
+    where = f"{org_name} " if org_name else ""
+    org_intro = f"you're {name} from {org_name} and " if org_name else f"you're {name} and "
     return (
         f"The customer said: \"{question}\"\n\n"
         f"You don't have specifics on this right now. Reply briefly, warmly, and like a real "
-        f"person on the {org} team, in the SAME language the customer used:\n"
-        f"- If they ask who you are, introduce yourself naturally: you're {cfg.assistant_name} "
-        f"from {org} and you're here to help.\n"
+        f"person on the {where}team, in the SAME language the customer used:\n"
+        f"- If they ask who you are, introduce yourself naturally: {org_intro}you're here to "
+        f"help.\n"
         f"- If it's a greeting, thanks, or small talk, respond warmly and naturally.\n"
-        f"- Otherwise, kindly say it's outside what we can help with here, and offer to help "
-        f"with something about {org}.\n"
+        f"- Otherwise, kindly say it's outside what we can help with here, and offer to help.\n"
         f"Speak as \"we/our\". Do NOT make up any product, price, name, or detail."
     )
 
