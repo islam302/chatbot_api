@@ -63,7 +63,7 @@ services:
       - static_volume:/app/staticfiles:ro
       - media_volume:/app/media:ro
     ports:
-      - "80:80"
+      - "127.0.0.1:8017:80"
       # - "443:443"   # enable after adding TLS certs (see DEPLOY.md)
     depends_on:
       - web
