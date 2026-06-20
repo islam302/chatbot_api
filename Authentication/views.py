@@ -28,6 +28,8 @@ SELF_SERVICE_ACTIONS = {"me", "change_password", "api_key", "regenerate_api_key"
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
+    # Rate-limit login attempts per IP to deter brute force / credential stuffing.
+    throttle_scope = "login"
 
 
 class UserViewSet(viewsets.ModelViewSet):
