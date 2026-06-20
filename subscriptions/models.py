@@ -1,0 +1,101 @@
+"""Subscription plans for the multi-tenant chatbot.
+
+A ``Plan`` is a sellable bundle of limits (monthly questions + a fair-use token
+cap + document/storage/rate limits + which LLM model to use). A ``Subscription``
+assigns one plan to a user (tenant) for a billing period.
+
+Limits are *enforced* in ``knowledge.services.quota`` — this app only defines the
+bundles and who is on which one. Selling by **questions/month** keeps it simple
+for customers; the **token cap** is a safety net against abuse (huge prompts).
+"""
+
+from __future__ import annotations
+
+import uuid
+
+from django.conf import settings
+from django.db import models
+from django.utils import timezone
+
+
+class TimestampedModel(models.Model):
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        abstract = True
+
+
+class Plan(TimestampedModel):
+    """A sellable bundle of usage limits."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100, unique=True)
+    slug = models.SlugField(max_length=120, unique=True)
+    description = models.TextField(blank=True, default="")
+
+    # Selling price (informational — billing/collection is handled elsewhere).
+    price_usd = models.DecimalField(max_digits=9, decimal_places=2, default=0)
+
+    # Core metric the customer buys. 0 = unlimited.
+    monthly_questions = models.PositiveIntegerField(default=0)
+    # Fair-use safety net on cost. 0 = unlimited.
+    monthly_token_cap = models.PositiveBigIntegerField(default=0)
+
+    # Resource limits.
+    max_documents = models.PositiveIntegerField(default=100)
+    max_total_mb = models.FloatField(default=200)
+    max_requests_per_min = models.PositiveIntegerField(default=60)
+
+    # Which LLM answers for tenants on this plan (per-plan model routing).
+    llm_model = models.CharField(max_length=64, default="gpt-4o")
+
+    is_active = models.BooleanField(default=True)
+    sort_order = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ["sort_order", "price_usd"]
+
+    def __str__(self):
+        return self.name
+
+
+class SubscriptionStatus(models.TextChoices):
+    ACTIVE = "active", "Active"
+    EXPIRED = "expired", "Expired"
+    CANCELED = "canceled", "Canceled"
+
+
+class Subscription(TimestampedModel):
+    """A user's current plan assignment for a billing period."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="subscription",
+    )
+    plan = models.ForeignKey(
+        Plan, on_delete=models.PROTECT, related_name="subscriptions"
+    )
+    status = models.CharField(
+        max_length=16, choices=SubscriptionStatus.choices, default=SubscriptionStatus.ACTIVE
+    )
+    current_period_start = models.DateTimeField(default=timezone.now)
+    current_period_end = models.DateTimeField()
+    auto_renew = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["status", "current_period_end"])]
+
+    def __str__(self):
+        return f"{self.user} → {self.plan} ({self.status})"
+
+    @property
+    def is_current(self) -> bool:
+        """True when the subscription is active and within its period."""
+        return (
+            self.status == SubscriptionStatus.ACTIVE
+            and self.current_period_end > timezone.now()
+        )

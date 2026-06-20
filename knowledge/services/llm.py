@@ -112,20 +112,26 @@ class AnthropicBackend:
 
 
 _lock = threading.Lock()
-_backend: LLMBackend | None = None
+# Cache one backend per (provider, model) so per-plan model routing reuses clients.
+_backends: dict[tuple[str, str], LLMBackend] = {}
 
 
-def get_backend() -> LLMBackend:
-    global _backend
-    if _backend is not None:
-        return _backend
+def get_backend(model: str | None = None) -> LLMBackend:
+    """Return an LLM backend, optionally for a specific model (e.g. a plan's model).
+
+    ``model=None`` uses the provider's default (``LLM_MODEL`` env / built-in).
+    """
+    provider = os.getenv("LLM_PROVIDER", "openai").lower()
+    key = (provider, model or "")
+    cached = _backends.get(key)
+    if cached is not None:
+        return cached
     with _lock:
-        if _backend is None:
-            provider = os.getenv("LLM_PROVIDER", "openai").lower()
+        if key not in _backends:
             if provider == "openai":
-                _backend = OpenAIBackend()
+                _backends[key] = OpenAIBackend(model=model)
             elif provider == "anthropic":
-                _backend = AnthropicBackend()
+                _backends[key] = AnthropicBackend(model=model)
             else:
                 raise LLMError(f"Unsupported LLM_PROVIDER: {provider}")
-    return _backend
+    return _backends[key]

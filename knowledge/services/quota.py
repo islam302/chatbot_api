@@ -49,6 +49,14 @@ class TokenBudgetExceeded(QuotaError):
     status_code = 429
 
 
+class QuestionQuotaExceeded(QuotaError):
+    status_code = 429
+
+
+class SubscriptionInactive(QuotaError):
+    status_code = 402  # Payment Required
+
+
 # --- Limit resolution -------------------------------------------------------
 
 
@@ -59,6 +67,7 @@ class EffectiveLimits:
     max_requests_per_min: int
     monthly_token_cap: int  # 0 = unlimited
     is_suspended: bool
+    monthly_questions: int = 0  # 0 = unlimited (from the active plan)
 
 
 def get_quota(user) -> TenantQuota:
@@ -66,30 +75,41 @@ def get_quota(user) -> TenantQuota:
     return quota
 
 
+def _plan_limits(user) -> dict | None:
+    """Active subscription plan's limits, or None. Lazy import to avoid coupling."""
+    try:
+        from subscriptions.services import plan_limits
+    except Exception:
+        return None
+    try:
+        return plan_limits(user)
+    except Exception:
+        return None
+
+
 def effective_limits(user) -> EffectiveLimits:
+    """Resolve limits with precedence: per-tenant override > active plan > defaults."""
     quota = get_quota(user)
+    plan = _plan_limits(user) or {}
+
+    def pick(quota_val, key, setting_name, default, cast):
+        if quota_val is not None:
+            return cast(quota_val)
+        if key in plan and plan[key] is not None:
+            return cast(plan[key])
+        return cast(getattr(settings, setting_name, default))
+
     return EffectiveLimits(
-        max_documents=(
-            quota.max_documents
-            if quota.max_documents is not None
-            else int(getattr(settings, "TENANT_MAX_DOCUMENTS", 100))
+        max_documents=pick(quota.max_documents, "max_documents", "TENANT_MAX_DOCUMENTS", 100, int),
+        max_total_mb=pick(quota.max_total_mb, "max_total_mb", "TENANT_MAX_TOTAL_MB", 200, float),
+        max_requests_per_min=pick(
+            quota.max_requests_per_min, "max_requests_per_min", "TENANT_MAX_REQUESTS_PER_MIN", 60, int
         ),
-        max_total_mb=(
-            quota.max_total_mb
-            if quota.max_total_mb is not None
-            else float(getattr(settings, "TENANT_MAX_TOTAL_MB", 200))
-        ),
-        max_requests_per_min=(
-            quota.max_requests_per_min
-            if quota.max_requests_per_min is not None
-            else int(getattr(settings, "TENANT_MAX_REQUESTS_PER_MIN", 60))
-        ),
-        monthly_token_cap=(
-            quota.monthly_token_cap
-            if quota.monthly_token_cap is not None
-            else int(getattr(settings, "TENANT_MONTHLY_TOKEN_CAP", 0))
+        monthly_token_cap=pick(
+            quota.monthly_token_cap, "monthly_token_cap", "TENANT_MONTHLY_TOKEN_CAP", 0, int
         ),
         is_suspended=quota.is_suspended,
+        monthly_questions=int(plan.get("monthly_questions") or 0),
     )
 
 
@@ -112,12 +132,33 @@ def _month_start(now=None):
     return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
+def period_start(user):
+    """Start of the current usage window — the subscription period if any, else
+    the calendar month (so non-subscribers still get a monthly reset)."""
+    try:
+        from subscriptions.services import period_start as sub_period_start
+
+        start = sub_period_start(user)
+        if start is not None:
+            return start
+    except Exception:
+        pass
+    return _month_start()
+
+
 def tokens_used_this_month(user) -> int:
-    start = _month_start()
+    start = period_start(user)
     agg = UsageRecord.objects.filter(user=user, created_at__gte=start).aggregate(
         ti=Sum("tokens_in"), to=Sum("tokens_out")
     )
     return (agg["ti"] or 0) + (agg["to"] or 0)
+
+
+def questions_used_this_period(user) -> int:
+    start = period_start(user)
+    return UsageRecord.objects.filter(
+        user=user, kind=UsageKind.CHAT, created_at__gte=start
+    ).count()
 
 
 def requests_in_last_minute(user) -> int:
@@ -155,9 +196,23 @@ def check_document_quota(user, incoming_bytes: int) -> None:
         )
 
 
+def _check_subscription_active(user) -> None:
+    """If the user HAS a subscription that lapsed, block them. No subscription at
+    all = allowed (free tier on default limits)."""
+    try:
+        from subscriptions.services import subscription_state
+    except Exception:
+        return
+    if subscription_state(user) == "inactive":
+        raise SubscriptionInactive(
+            "Your subscription has expired. Please renew to continue."
+        )
+
+
 def check_chat_allowed(user) -> None:
-    """Raise if the tenant is suspended, rate-limited, or over its token cap."""
+    """Raise if suspended, lapsed, rate-limited, or over the question/token quota."""
     check_not_suspended(user)
+    _check_subscription_active(user)
     limits = effective_limits(user)
 
     if requests_in_last_minute(user) >= limits.max_requests_per_min:
@@ -166,9 +221,15 @@ def check_chat_allowed(user) -> None:
             f"Please slow down."
         )
 
+    if limits.monthly_questions and questions_used_this_period(user) >= limits.monthly_questions:
+        raise QuestionQuotaExceeded(
+            f"You've used all {limits.monthly_questions} questions in your plan for "
+            f"this period. Upgrade your plan or wait for the next cycle."
+        )
+
     if limits.monthly_token_cap and tokens_used_this_month(user) >= limits.monthly_token_cap:
         raise TokenBudgetExceeded(
-            "Monthly token budget exhausted. It resets at the start of next month."
+            "Usage budget exhausted for this period. It resets next cycle."
         )
 
 

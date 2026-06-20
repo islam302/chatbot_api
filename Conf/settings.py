@@ -71,6 +71,7 @@ INSTALLED_APPS = [
     # Local
     "Authentication",
     "knowledge",
+    "subscriptions",
     "WhatsApp",
 ]
 
@@ -163,6 +164,14 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    # Scoped throttling: only acts on views that set `throttle_scope` (e.g. login),
+    # so it never affects authenticated API traffic or the WhatsApp webhook.
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.ScopedRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "login": "10/min",   # brute-force / credential-stuffing protection
+    },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
     "DEFAULT_FILTER_BACKENDS": [

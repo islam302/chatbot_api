@@ -33,6 +33,7 @@ urlpatterns = [
     # API v1
     path("api/v1/", include("Authentication.urls")),
     path("api/v1/", include("knowledge.urls")),
+    path("api/v1/", include("subscriptions.urls")),
     path("api/v1/whatsapp/", include("WhatsApp.urls")),
 ]
 

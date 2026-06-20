@@ -86,6 +86,7 @@ def answer_question(
     # Per-user chatbot config: identity + grounding + retrieval overrides.
     cfg = resolve_config(user)
     system_prompt = build_system_prompt(cfg)
+    llm_model = _resolve_llm_model(user)  # per-plan model, or None for default
 
     base_threshold = (
         rag_threshold
@@ -135,7 +136,7 @@ def answer_question(
         if cfg.no_answer_message:
             return AnswerResult(answer=cfg.no_answer_message, source="rag", confident=False)
         try:
-            llm = get_backend()
+            llm = get_backend(llm_model)
             res = llm.complete_with_usage(system_prompt, build_no_data_prompt(question, cfg))
             return AnswerResult(
                 answer=res.text,
@@ -168,7 +169,7 @@ def answer_question(
     )
 
     try:
-        llm = get_backend()
+        llm = get_backend(llm_model)
         res = llm.complete_with_usage(system_prompt, user_prompt)
     except LLMError as exc:
         raise RagUnavailable(str(exc)) from exc
@@ -192,6 +193,19 @@ def answer_question(
         ],
         chunk_hits=chunks,
     )
+
+
+def _resolve_llm_model(user) -> str | None:
+    """The LLM model for this user's subscription plan, or None for the default.
+    Lazy import so RAG doesn't hard-depend on the subscriptions app."""
+    if user is None or not getattr(user, "is_authenticated", False):
+        return None
+    try:
+        from subscriptions.services import resolve_model
+
+        return resolve_model(user)
+    except Exception:
+        return None
 
 
 def _render_history(history: list[dict]) -> str:
