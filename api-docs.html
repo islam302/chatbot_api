@@ -191,12 +191,6 @@
     <a href="#user-change-password">Change password</a>
     <a href="#my-api-key">My API key</a>
 
-    <h4>Admin — users &amp; keys</h4>
-    <a href="#user-admin">Users (admin)</a>
-    <a href="#user-register">Create / register user</a>
-    <a href="#user-set-password">Set user password</a>
-    <a href="#api-keys-admin">API keys control</a>
-
     <h4>Knowledge</h4>
     <a href="#documents">Documents</a>
     <a href="#upload-word">Upload Word file</a>
@@ -210,10 +204,24 @@
     <h4>Analytics &amp; Quotas</h4>
     <a href="#analytics-usage">Usage &amp; quota</a>
 
+    <h4>Subscriptions</h4>
+    <a href="#my-subscription">My subscription</a>
+    <a href="#plans">Browse plans</a>
+
     <h4>WhatsApp</h4>
     <a href="#wa-webhook">Webhook</a>
     <a href="#wa-send">Send message</a>
     <a href="#wa-data">Read-only data</a>
+
+    <h4>Admin controls</h4>
+    <a href="#admin">Overview</a>
+    <a href="#user-admin">Users</a>
+    <a href="#user-register">Create / register user</a>
+    <a href="#user-set-password">Set user password</a>
+    <a href="#api-keys-admin">API keys control</a>
+    <a href="#plans-admin">Plans (manage)</a>
+    <a href="#subscriptions-admin">Assign subscriptions</a>
+    <a href="#admin-analytics">All-tenant analytics</a>
 
     <h4>Reference</h4>
     <a href="#config">Configuration (env)</a>
@@ -259,10 +267,13 @@ Authorization: ApiKey 9f2c1a4e…                     # per-user API key</code><
   <tr><th>Status</th><th>When</th></tr>
   <tr><td><code>400</code></td><td>Validation failure. Body is a per-field map or <code>{"detail": "…"}</code>.</td></tr>
   <tr><td><code>401</code></td><td>Missing or invalid credentials (token/API key).</td></tr>
-  <tr><td><code>403</code></td><td>Authenticated but not allowed (e.g. non-admin hitting an admin endpoint).</td></tr>
+  <tr><td><code>402</code></td><td>Subscription expired — renew to continue (chat).</td></tr>
+  <tr><td><code>403</code></td><td>Authenticated but not allowed (e.g. non-admin hitting an admin endpoint), or a suspended tenant.</td></tr>
   <tr><td><code>404</code></td><td>Resource not found.</td></tr>
   <tr><td><code>405</code></td><td>Method not allowed (e.g. POST to a detail-only route).</td></tr>
+  <tr><td><code>413</code></td><td>Document / storage quota exceeded (uploads).</td></tr>
   <tr><td><code>415</code></td><td>Unsupported media type — you didn't send <code>Content-Type: application/json</code>.</td></tr>
+  <tr><td><code>429</code></td><td>Rate limit, monthly question quota, or token budget exceeded (also login throttle).</td></tr>
   <tr><td><code>500</code></td><td>Unhandled server error.</td></tr>
   <tr><td><code>502</code></td><td>Upstream provider failed (e.g. Meta API rejected an outgoing message).</td></tr>
   <tr><td><code>503</code></td><td>Chat pipeline cannot run (missing <code>OPENAI_API_KEY</code>, embedding/LLM provider unreachable).</td></tr>
@@ -348,8 +359,9 @@ Authorization: ApiKey 9f2c1a4e…                     # per-user API key</code><
 
 <!-- =============================================== ADMIN: USERS & KEYS =============================================== -->
 
-<h2 id="admin">Admin — users &amp; API keys</h2>
-<p>User management and the API-key control plane are <strong>admin-only</strong> (<code>is_staff</code>). There is no public self-registration — admins create accounts.</p>
+<h2 id="admin">Admin controls</h2>
+<p>Everything in this section is <strong>admin-only</strong> (<code>is_staff</code>): user management, the API-key control plane, plan &amp; subscription management, and all-tenant analytics. There is no public self-registration — admins create accounts. Send an admin JWT (or an admin's API key).</p>
+<p><strong>In this section:</strong> <a href="#user-admin">Users</a> · <a href="#user-register">Create user</a> · <a href="#user-set-password">Set password</a> · <a href="#api-keys-admin">API keys</a> · <a href="#plans-admin">Plans</a> · <a href="#subscriptions-admin">Subscriptions</a> · <a href="#admin-analytics">All-tenant analytics</a>.</p>
 
 <div class="ep" id="user-admin">
   <div class="ep-head"><span class="method m-any">CRUD</span><span class="path">/api/v1/users/</span><span class="badge staff">admin</span></div>
@@ -405,6 +417,45 @@ Authorization: ApiKey 9f2c1a4e…                     # per-user API key</code><
 <h4>Object shape</h4>
 <pre><code>{ "id": "…", "user": "&lt;user_id&gt;", "username": "alice", "key": "9f2c1a4e…",
   "is_active": true, "last_used_at": "…", "created_at": "…" }</code></pre>
+
+<h3 id="plans-admin">Plans — manage <code>/api/v1/plans/</code> <span class="badge staff" style="margin-left:6px">admin</span></h3>
+<p>Anyone authenticated can <strong>read</strong> active plans (catalog — see <a href="#plans">Browse plans</a>); only admins can create/edit/delete them.</p>
+<table>
+  <tr><th>Method</th><th>Path</th><th>Notes</th></tr>
+  <tr><td><code>POST</code></td><td><code>/plans/</code></td><td>Create a plan</td></tr>
+  <tr><td><code>PATCH</code></td><td><code>/plans/&lt;id&gt;/</code></td><td>Edit limits / price / model</td></tr>
+  <tr><td><code>DELETE</code></td><td><code>/plans/&lt;id&gt;/</code></td><td>Remove a plan</td></tr>
+</table>
+<h4>Plan object</h4>
+<pre><code>{
+  "id": "…", "name": "Starter", "slug": "starter", "description": "...",
+  "price_usd": "39.00",
+  "monthly_questions": 1000,        // 0 = unlimited (the sellable metric)
+  "monthly_token_cap": 5000000,     // 0 = unlimited (fair-use safety net)
+  "max_documents": 25, "max_total_mb": 50, "max_requests_per_min": 60,
+  "llm_model": "gpt-4o",            // which model answers for this plan
+  "is_active": true, "sort_order": 1
+}</code></pre>
+<p>Seed the recommended plans (Trial / Starter / Growth / Business) on the server with:
+<code>python manage.py seed_plans</code>.</p>
+
+<h3 id="subscriptions-admin">Subscriptions — assign <code>/api/v1/subscriptions/</code> <span class="badge staff" style="margin-left:6px">admin</span></h3>
+<p>Put a user on a plan for a billing period. Admin only — a tenant can never change their own plan.</p>
+<pre><code>// POST /api/v1/subscriptions/   (assign or move a user to a plan)
+{ "user": "&lt;user_id&gt;", "plan": "&lt;plan_id&gt;", "duration_days": 30, "auto_renew": true }
+
+// GET /api/v1/subscriptions/    list all subscriptions
+// GET /api/v1/subscriptions/&lt;id&gt;/   one subscription</code></pre>
+<p>Enforcement is automatic on every <a href="#chat">chat</a> call: when a tenant exhausts
+<code>monthly_questions</code> → <code>429</code>; when the token cap is hit → <code>429</code>;
+when the subscription has expired → <code>402</code>. Users with <strong>no</strong> subscription
+fall back to the default free-tier limits.</p>
+
+<h3 id="admin-analytics">All-tenant analytics <span class="badge staff" style="margin-left:6px">admin</span></h3>
+<p>The usage endpoint accepts <code>?scope=all</code> for admins to get a per-tenant breakdown:</p>
+<pre><code>GET /api/v1/analytics/usage/?scope=all
+// → { "tenants": [ { "tenant": {...}, "totals": {...}, "quota": {...} }, ... ] }</code></pre>
+<p>Non-admins requesting <code>scope=all</code> get <code>403</code>. See <a href="#analytics-usage">Usage &amp; quota</a> for the per-tenant payload shape.</p>
 
 <!-- =============================================== KNOWLEDGE =============================================== -->
 
@@ -618,6 +669,48 @@ Authorization: ApiKey 9f2c1a4e…                     # per-user API key</code><
   }
 }</code></pre>
     <p><code>?scope=all</code> (admin only) → <code>{ "tenants": [ {…per-tenant payload…} ] }</code>. Non-admins get <code>403</code>.</p>
+  </div>
+</div>
+
+<!-- =============================================== SUBSCRIPTIONS =============================================== -->
+
+<h2 id="subscriptions-section">Subscriptions &amp; Plans</h2>
+
+<p>Each tenant can be put on a <strong>plan</strong> — a bundle of monthly questions + a fair-use token cap + document/storage limits + which LLM model answers. Plans are sold by <strong>questions/month</strong>; the token cap is a safety net against abuse. A tenant with <strong>no</strong> subscription runs on the default free-tier limits. Assigning plans is <a href="#subscriptions-admin">admin-only</a>.</p>
+
+<div class="ep" id="my-subscription">
+  <div class="ep-head"><span class="method m-get">GET</span><span class="path">/api/v1/my-subscription/</span><span class="badge auth">auth</span></div>
+  <div class="ep-body">
+    <p>The caller's own plan + live usage for the current period. Use it to render a "usage" widget.</p>
+    <h4>Response — 200</h4>
+<pre><code>{
+  "subscription": {            // null when on the free tier
+    "plan": { "name": "Starter", "monthly_questions": 1000, "llm_model": "gpt-4o", ... },
+    "status": "active",
+    "current_period_start": "2026-06-01T00:00:00Z",
+    "current_period_end":   "2026-07-01T00:00:00Z",
+    "is_current": true
+  },
+  "on_free_tier": false,
+  "usage": {
+    "questions_used": 134, "questions_limit": 1000, "questions_remaining": 866,   // *_limit 0 = unlimited, *_remaining null = unlimited
+    "tokens_used": 410000, "tokens_limit": 5000000, "tokens_remaining": 4590000,
+    "documents_used": 12, "documents_limit": 25, "documents_remaining": 13,
+    "storage_mb_used": 31.4, "storage_mb_limit": 50, "storage_mb_remaining": 18.6,
+    "requests_per_min": 60
+  }
+}</code></pre>
+    <p>Use <code>documents_remaining</code> / <code>storage_mb_remaining</code> to show "how much more you can upload", and <code>questions_remaining</code> for "questions left this period".</p>
+  </div>
+</div>
+
+<div class="ep" id="plans">
+  <div class="ep-head"><span class="method m-get">GET</span><span class="path">/api/v1/plans/</span><span class="badge auth">auth</span></div>
+  <div class="ep-body">
+    <p>Browse the available plans (catalog). Returns only <strong>active</strong> plans for non-admins. Managing plans is <a href="#plans-admin">admin-only</a>.</p>
+<pre><code>// GET /api/v1/plans/  → paginated list of plan objects
+{ "id": "…", "name": "Growth", "price_usd": "149.00",
+  "monthly_questions": 5000, "max_documents": 100, "llm_model": "gpt-4o", ... }</code></pre>
   </div>
 </div>
 
