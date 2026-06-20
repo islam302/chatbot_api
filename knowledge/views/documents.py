@@ -67,9 +67,10 @@ class UploadedDocumentViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         try:
             result = dispatch_ingestion(instance)
-        except Exception as exc:
+        except Exception:
+            logger.exception("Reindex failed for %s", instance.id)
             return Response(
-                {"detail": str(exc)},
+                {"detail": "Re-indexing failed. Please try again later."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
         instance.refresh_from_db()
@@ -109,10 +110,10 @@ class UploadedDocumentViewSet(viewsets.ModelViewSet):
             result = import_document_from_word(uploaded, uploaded_by=request.user)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as exc:
+        except Exception:
             logger.exception("Word upload ingestion failed")
             return Response(
-                {"detail": f"Failed to ingest Word file: {exc}"},
+                {"detail": "Failed to ingest the Word file."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 

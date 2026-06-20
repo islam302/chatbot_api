@@ -10,6 +10,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from Authentication.authentication import APIKeyAuthentication
 from ..models import DocumentStatus, UploadedDocument
 from ..services.api_content_processor import APIContentRAGProcessor, APIContentProcessingError
+from ..services.net import UnsafeURLError, validate_public_url
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,12 @@ class SyncAPIContentView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # SSRF guard: reject internal/reserved destinations before connecting.
+        try:
+            validate_public_url(api_url)
+        except UnsafeURLError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             # Fetch from API
             logger.info(f"Fetching from {api_url}")
@@ -98,18 +105,18 @@ class SyncAPIContentView(APIView):
         except requests.RequestException as e:
             logger.error(f"API request failed: {e}")
             return Response(
-                {"detail": f"API request failed: {e}"},
+                {"detail": "Could not fetch content from the provided URL."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         except APIContentProcessingError as e:
             logger.error(f"Processing failed: {e}")
             return Response(
-                {"detail": f"Processing failed: {e}"},
+                {"detail": "Failed to process the fetched content."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
+        except Exception:
+            logger.exception("Unexpected error while syncing API content")
             return Response(
-                {"detail": f"Unexpected error: {e}"},
+                {"detail": "An unexpected error occurred."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )

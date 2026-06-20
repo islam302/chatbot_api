@@ -69,8 +69,13 @@ class ChatAPIView(APIView):
                 user=request.user,
             )
         except RagUnavailable as exc:
+            # Log the real cause; return a generic message (never leak internals).
+            import logging
+
+            logging.getLogger("knowledge").error("RAG unavailable: %s", exc)
             return Response(
-                {"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE
+                {"detail": "The assistant is temporarily unavailable. Please try again."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         elapsed = int((time.monotonic() - started) * 1000)
 
