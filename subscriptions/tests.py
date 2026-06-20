@@ -106,6 +106,14 @@ class SubscriptionApiTests(APITestCase):
         res = self.client.post(reverse("plan-list"), body, format="json", HTTP_X_API_KEY=self.key)
         self.assertIn(res.status_code, (403, 401))
 
+    def test_admin_creates_plan_without_slug(self):
+        body = {"name": "Pro Plus", "monthly_questions": 20000, "price_usd": "299.00"}
+        res = self.client.post(
+            reverse("plan-list"), body, format="json", HTTP_X_API_KEY=self.admin_key
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.data["slug"], "pro-plus")  # auto-derived from name
+
     def test_admin_assigns_subscription(self):
         body = {"user": str(self.user.id), "plan": str(self.plan.id), "duration_days": 30}
         res = self.client.post(
