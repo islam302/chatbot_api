@@ -37,7 +37,7 @@ ALLOWED_HOSTS = _env_list(
 
 CORS_ALLOWED_ORIGINS = _env_list(
     "CORS_ALLOWED_ORIGINS",
-    default=["http://localhost:3000", "http://127.0.0.1:3000"],
+    default=["http://localhost:3000", "http://127.0.0.1:3000", "https://clickai-alpha.vercel.app"],
 )
 # Always allow common local frontend dev servers (Vite :5173, CRA :3000) so a
 # developer can build against any deployment without editing CORS_ALLOWED_ORIGINS.
@@ -47,6 +47,7 @@ _LOCAL_DEV_ORIGINS = [
     "http://127.0.0.1:5173",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://clickai-alpha.vercel.app",
 ]
 for _origin in _LOCAL_DEV_ORIGINS:
     if _origin not in CORS_ALLOWED_ORIGINS:
