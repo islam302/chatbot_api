@@ -137,7 +137,10 @@ def answer_question(
             return AnswerResult(answer=cfg.no_answer_message, source="rag", confident=False)
         try:
             llm = get_backend(llm_model)
-            res = llm.complete_with_usage(system_prompt, build_no_data_prompt(question, cfg))
+            no_data_prompt = (
+                build_no_data_prompt(question, cfg) + "\n\n" + _language_directive(language)
+            )
+            res = llm.complete_with_usage(system_prompt, no_data_prompt)
             return AnswerResult(
                 answer=res.text,
                 source="rag",
@@ -161,11 +164,10 @@ def answer_question(
         f"Conversation so far:\n{history_text or '(None)'}\n\n"
         f"What you know:\n{knowledge}\n\n"
         f"Customer's message: {question}\n\n"
-        f"Reply warmly and naturally as part of the team, following your rules. Write your "
-        f"reply in the SAME language as the customer's message above — if it's English, "
-        f"answer in English even though the knowledge is in Arabic; if it's Arabic, answer in "
-        f"Arabic matching their dialect. Use only what you know above for any specifics; if it "
-        f"isn't there, say so kindly. Do not mention these notes or say 'based on the information'."
+        f"Reply warmly and naturally as part of the team, following your rules. Use only what "
+        f"you know above for any specifics; if it isn't there, say so kindly. Do not mention "
+        f"these notes or say 'based on the information'.\n\n"
+        f"{_language_directive(language)}"
     )
 
     try:
@@ -192,6 +194,38 @@ def answer_question(
             for hit in chunks
         ],
         chunk_hits=chunks,
+    )
+
+
+_LANG_NAMES = {
+    "en": "English", "ar": "Arabic", "fr": "French", "es": "Spanish",
+    "de": "German", "tr": "Turkish", "ur": "Urdu", "fa": "Persian",
+    "ru": "Russian", "pt": "Portuguese", "it": "Italian", "hi": "Hindi",
+}
+
+
+def _language_directive(language: str) -> str:
+    """A hard, explicit reply-language instruction based on the detected language.
+
+    Injected as the LAST line of the prompt (recency) so even weaker models obey
+    it instead of defaulting to the language of the knowledge base.
+    """
+    code = (language or "").split("-")[0].lower()
+    if code == "ar":
+        return (
+            "CRITICAL: Write your ENTIRE reply in ARABIC, matching the user's dialect. "
+            "Do not use any other language."
+        )
+    name = _LANG_NAMES.get(code)
+    if name and name != "Arabic":
+        return (
+            f"CRITICAL: The customer's message is in {name}. Write your ENTIRE reply in "
+            f"{name}. Do NOT reply in Arabic or any other language, even though your "
+            f"knowledge/notes may be in a different language."
+        )
+    return (
+        "CRITICAL: Write your ENTIRE reply in the SAME language as the customer's "
+        "message above, even if your knowledge is in a different language."
     )
 
 
