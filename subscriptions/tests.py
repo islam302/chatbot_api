@@ -122,6 +122,47 @@ class SubscriptionApiTests(APITestCase):
         self.assertEqual(res.status_code, 201)
         self.assertTrue(Subscription.objects.filter(user=self.user, plan=self.plan).exists())
 
+    def test_register_with_plan_creates_subscription(self):
+        from django.contrib.auth import get_user_model
+
+        body = {
+            "username": "newco", "email": "newco@x.com",
+            "password": "S0meStr0ng!Pass", "password_confirm": "S0meStr0ng!Pass",
+            "plan": "starter", "plan_duration_days": 30,
+        }
+        res = self.client.post(
+            reverse("user-list"), body, format="json", HTTP_X_API_KEY=self.admin_key
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertIn("subscription", res.data)
+        self.assertEqual(res.data["subscription"]["plan"], "Starter")
+        u = get_user_model().objects.get(username="newco")
+        self.assertTrue(Subscription.objects.filter(user=u, plan=self.plan).exists())
+
+    def test_register_with_invalid_plan_returns_400(self):
+        body = {
+            "username": "newco2", "email": "newco2@x.com",
+            "password": "S0meStr0ng!Pass", "password_confirm": "S0meStr0ng!Pass",
+            "plan": "does-not-exist",
+        }
+        res = self.client.post(
+            reverse("user-list"), body, format="json", HTTP_X_API_KEY=self.admin_key
+        )
+        self.assertEqual(res.status_code, 400)
+
+    def test_register_without_plan_still_works(self):
+        from django.contrib.auth import get_user_model
+
+        body = {
+            "username": "noplan", "email": "noplan@x.com",
+            "password": "S0meStr0ng!Pass", "password_confirm": "S0meStr0ng!Pass",
+        }
+        res = self.client.post(
+            reverse("user-list"), body, format="json", HTTP_X_API_KEY=self.admin_key
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertNotIn("subscription", res.data)
+
     def test_my_subscription_free_tier(self):
         res = self.client.get(reverse("my-subscription"), HTTP_X_API_KEY=self.key)
         self.assertEqual(res.status_code, 200)

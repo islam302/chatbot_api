@@ -7,9 +7,48 @@ default limits (so existing tenants keep working as a free tier).
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from django.utils import timezone
 
-from .models import Subscription, SubscriptionStatus
+from .models import Plan, Subscription, SubscriptionStatus
+
+
+def resolve_plan(ref):
+    """Look up a Plan by slug or UUID. Returns the Plan or None."""
+    if not ref:
+        return None
+    plan = Plan.objects.filter(slug=str(ref)).first()
+    if plan is not None:
+        return plan
+    try:
+        return Plan.objects.filter(pk=ref).first()
+    except Exception:
+        return None
+
+
+def assign_plan(user, plan, *, duration_days=30, auto_renew=True):
+    """Put ``user`` on ``plan`` (Plan instance or slug/UUID) for a period.
+
+    Reusable for admin assignment and a future self-serve signup. Returns the
+    Subscription, or None if the plan couldn't be resolved.
+    """
+    if not isinstance(plan, Plan):
+        plan = resolve_plan(plan)
+    if plan is None:
+        return None
+    now = timezone.now()
+    sub, _ = Subscription.objects.update_or_create(
+        user=user,
+        defaults={
+            "plan": plan,
+            "status": SubscriptionStatus.ACTIVE,
+            "current_period_start": now,
+            "current_period_end": now + timedelta(days=int(duration_days or 30)),
+            "auto_renew": auto_renew,
+        },
+    )
+    return sub
 
 
 def get_subscription(user):

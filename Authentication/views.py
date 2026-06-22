@@ -57,15 +57,46 @@ class UserViewSet(viewsets.ModelViewSet):
 
     @extend_schema(responses={201: UserSerializer})
     def create(self, request, *args, **kwargs):
-        """Admin only: create a user and issue an API key."""
+        """Admin only: create a user, issue an API key, and optionally put them
+        on a subscription plan.
+
+        Send an optional ``plan`` (slug or id) and ``plan_duration_days``
+        (default 30) to assign a subscription at registration. This same flow is
+        reusable for a future self-serve signup endpoint.
+        """
         serializer = UserRegistrationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        # Resolve the plan (if any) BEFORE creating the user, so an invalid plan
+        # fails cleanly without leaving an orphaned account.
+        plan_ref = request.data.get("plan")
+        plan = None
+        if plan_ref:
+            from subscriptions.services import resolve_plan
+
+            plan = resolve_plan(plan_ref)
+            if plan is None:
+                return Response(
+                    {"plan": "Unknown plan (use a valid plan slug or id)."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         user = serializer.save()
         api_key, _ = APIKey.objects.get_or_create(user=user)
-        return Response(
-            {**UserSerializer(user).data, "api_key": api_key.key},
-            status=status.HTTP_201_CREATED,
-        )
+
+        data = {**UserSerializer(user).data, "api_key": api_key.key}
+        if plan is not None:
+            from subscriptions.services import assign_plan
+
+            sub = assign_plan(
+                user, plan, duration_days=request.data.get("plan_duration_days", 30)
+            )
+            data["subscription"] = {
+                "plan": sub.plan.name,
+                "status": sub.status,
+                "current_period_end": sub.current_period_end,
+            }
+        return Response(data, status=status.HTTP_201_CREATED)
 
     @extend_schema(
         request=UserRegistrationSerializer,
@@ -79,16 +110,8 @@ class UserViewSet(viewsets.ModelViewSet):
         url_path="create",
     )
     def create_user(self, request):
-        """Admin only: Create new user and generate API key."""
-        serializer = UserRegistrationSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
-        api_key, _ = APIKey.objects.get_or_create(user=user)
-        response_data = {
-            **UserSerializer(user).data,
-            "api_key": api_key.key,
-        }
-        return Response(response_data, status=status.HTTP_201_CREATED)
+        """Admin only: Create new user + API key (+ optional plan). Alias of create."""
+        return self.create(request)
 
     @extend_schema(
         request=UserRegistrationSerializer,

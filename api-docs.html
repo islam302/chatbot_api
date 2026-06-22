@@ -374,7 +374,7 @@ Authorization: ApiKey 9f2c1a4e…                     # per-user API key</code><
 <div class="ep" id="user-register">
   <div class="ep-head"><span class="method m-post">POST</span><span class="path">/api/v1/users/</span> <span class="path">· /users/create/ · /users/register/</span><span class="badge staff">admin</span></div>
   <div class="ep-body">
-    <p>Create a user and automatically issue an API key. All three paths are equivalent aliases.</p>
+    <p>Create a user and automatically issue an API key. All three paths are equivalent aliases. Optionally assign a <strong>subscription plan</strong> at the same time via <code>plan</code> + <code>plan_duration_days</code>.</p>
     <h4>Request</h4>
 <pre><code>{
   "username": "original_software",
@@ -382,10 +382,17 @@ Authorization: ApiKey 9f2c1a4e…                     # per-user API key</code><
   "first_name": "maher",
   "last_name": "maher",
   "password": "S0meStr0ngPass!",
-  "password_confirm": "S0meStr0ngPass!"
+  "password_confirm": "S0meStr0ngPass!",
+  "plan": "starter",            // optional — plan slug or id (see /plans/)
+  "plan_duration_days": 30      // optional — default 30
 }</code></pre>
+    <p><code>plan</code> is optional: omit it and the user starts on the default free tier; pass an unknown plan and you get <code>400</code>.</p>
     <h4>Response — 201</h4>
-<pre><code>{ …user fields…, "role": "user", "api_key": "9f2c1a4e…" }</code></pre>
+<pre><code>{ …user fields…, "role": "user", "api_key": "9f2c1a4e…",
+  "subscription": {             // only present when a plan was assigned
+    "plan": "Starter", "status": "active", "current_period_end": "2026-07-17T…Z"
+  }
+}</code></pre>
     <div class="callout warn">Admin-only: call it with an admin's <code>Bearer</code> token or <code>ApiKey</code>. Without auth you get <code>401</code>. Passwords are validated (length, common-password, similarity to username); weak ones return <code>400</code>.</div>
   </div>
 </div>
