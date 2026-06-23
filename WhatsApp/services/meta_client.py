@@ -31,6 +31,17 @@ class WhatsAppConfig:
             verify_token=os.getenv("WHATSAPP_VERIFY_TOKEN", ""),
         )
 
+    @classmethod
+    def for_account(cls, account) -> "WhatsAppConfig":
+        """Config for a specific WhatsAppAccount, falling back to env values for
+        anything the account doesn't override (token, verify token)."""
+        base = cls.from_env()
+        return cls(
+            access_token=(getattr(account, "access_token", "") or base.access_token),
+            phone_number_id=(getattr(account, "phone_number_id", "") or base.phone_number_id),
+            verify_token=base.verify_token,
+        )
+
     @property
     def messages_url(self) -> str:
         return (

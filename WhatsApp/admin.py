@@ -1,11 +1,21 @@
 from django.contrib import admin
 
 from .models import (
+    WhatsAppAccount,
     WhatsAppAnalytics,
     WhatsAppMessage,
     WhatsAppSession,
     WhatsAppUser,
 )
+
+
+@admin.register(WhatsAppAccount)
+class WhatsAppAccountAdmin(admin.ModelAdmin):
+    list_display = ("display_name", "phone_number_id", "tenant", "is_active", "created_at")
+    list_filter = ("is_active",)
+    search_fields = ("phone_number_id", "display_name", "tenant__username")
+    raw_id_fields = ("tenant",)
+    readonly_fields = ("id", "created_at", "updated_at")
 
 
 @admin.register(WhatsAppUser)

@@ -1,11 +1,33 @@
 from rest_framework import serializers
 
 from .models import (
+    WhatsAppAccount,
     WhatsAppAnalytics,
     WhatsAppMessage,
     WhatsAppSession,
     WhatsAppUser,
 )
+
+
+class WhatsAppAccountSerializer(serializers.ModelSerializer):
+    tenant_username = serializers.CharField(source="tenant.username", read_only=True)
+
+    class Meta:
+        model = WhatsAppAccount
+        fields = [
+            "id",
+            "tenant",
+            "tenant_username",
+            "phone_number_id",
+            "access_token",
+            "display_name",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "tenant_username", "created_at", "updated_at"]
+        # Never return the send token in responses; accept it on write only.
+        extra_kwargs = {"access_token": {"write_only": True, "required": False}}
 
 
 class WhatsAppUserSerializer(serializers.ModelSerializer):

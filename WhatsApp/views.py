@@ -28,9 +28,12 @@ from .services.conversation import (
     handle_incoming_message,
     log_message,
 )
+from .models import WhatsAppAccount
+from .serializers import WhatsAppAccountSerializer
 from .services.meta_client import (
     MetaWhatsAppClient,
     WhatsAppClientError,
+    WhatsAppConfig,
     parse_incoming_message,
     parse_status_updates,
 )
@@ -84,13 +87,18 @@ class WhatsAppWebhookView(APIView):
             return HttpResponse("OK")
 
         try:
-            reply, user, session = handle_incoming_message(message_data)
+            reply, user, session, account = handle_incoming_message(message_data)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error processing incoming WhatsApp message")
             return HttpResponse("Error", status=500)
 
+        # Reply FROM the same number that received the message (per-tenant).
+        client = self.client
+        if account is not None:
+            client = MetaWhatsAppClient(WhatsAppConfig.for_account(account))
+
         try:
-            sent_id = self.client.send_text(message_data["from_number"], reply)
+            sent_id = client.send_text(message_data["from_number"], reply)
             log_message(
                 user=user,
                 session=session,
@@ -166,3 +174,21 @@ class WhatsAppAnalyticsViewSet(viewsets.ReadOnlyModelViewSet):
     filterset_fields = ["date"]
     ordering_fields = ["date"]
     ordering = ["-date"]
+
+
+class WhatsAppAccountViewSet(viewsets.ModelViewSet):
+    """Admin: link a tenant to a WhatsApp Business number (multi-tenant routing).
+
+    Create one per tenant: which `phone_number_id` belongs to which user, and
+    optionally a per-number send token. The webhook then answers from that
+    tenant's knowledge and replies from that number.
+    """
+
+    queryset = WhatsAppAccount.objects.select_related("tenant").all()
+    serializer_class = WhatsAppAccountSerializer
+    permission_classes = [permissions.IsAdminUser]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ["is_active", "tenant"]
+    search_fields = ["phone_number_id", "display_name", "tenant__username"]
+    ordering_fields = ["created_at", "display_name"]
+    ordering = ["-created_at"]

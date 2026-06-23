@@ -7,19 +7,49 @@ messages to either a built-in command handler or the RAG service.
 from __future__ import annotations
 
 import logging
+import os
 import time
 
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from knowledge.services.rag import RagUnavailable, answer_question
+from knowledge.views.chat import detect_language
 
 from ..models import (
+    WhatsAppAccount,
     WhatsAppMessage,
     WhatsAppSession,
     WhatsAppUser,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_account_and_tenant(phone_number_id: str):
+    """Map the business number that received a message to (account, tenant).
+
+    Falls back to the ``WHATSAPP_TENANT`` env username (single-tenant setups).
+    Returns ``(account_or_None, tenant_or_None)``.
+    """
+    account = None
+    if phone_number_id:
+        account = (
+            WhatsAppAccount.objects.filter(
+                phone_number_id=phone_number_id, is_active=True
+            )
+            .select_related("tenant")
+            .first()
+        )
+    if account is not None:
+        return account, account.tenant
+
+    username = os.getenv("WHATSAPP_TENANT", "").strip()
+    if username:
+        tenant = get_user_model().objects.filter(username=username).first()
+        if tenant is not None:
+            return None, tenant
+    return None, None
 
 
 WELCOME_MESSAGE = (
@@ -78,10 +108,12 @@ def log_message(
     )
 
 
-def handle_incoming_message(message_data: dict) -> tuple[str, WhatsAppUser, WhatsAppSession]:
-    """Process an incoming text message, returning the reply to send back.
+def handle_incoming_message(message_data: dict):
+    """Process an incoming text message, returning ``(reply, user, session, account)``.
 
-    Also persists incoming/outgoing messages and updates session/user state.
+    The reply is generated from the knowledge of the TENANT that owns the
+    business number that received the message (multi-tenant). Also persists
+    incoming/outgoing messages and updates session/user state.
     """
     text = message_data["message_text"]
     user = get_or_create_user(
@@ -94,9 +126,11 @@ def handle_incoming_message(message_data: dict) -> tuple[str, WhatsAppUser, What
 
     log_message(user=user, session=session, message_type="incoming", text=text)
 
+    account, tenant = resolve_account_and_tenant(message_data.get("phone_number_id", ""))
+
     started = time.monotonic()
     try:
-        reply = _route(text, user)
+        reply = _route(text, user, tenant)
         error_message = ""
     except Exception as exc:  # noqa: BLE001 — surfaced to operator via logs
         logger.exception("Error generating WhatsApp reply")
@@ -112,18 +146,25 @@ def handle_incoming_message(message_data: dict) -> tuple[str, WhatsAppUser, What
         response_time_ms=elapsed_ms,
         error_message=error_message,
     )
-    return reply, user, session
+    return reply, user, session, account
 
 
-def _route(text: str, user: WhatsAppUser) -> str:
+def _route(text: str, user: WhatsAppUser, tenant) -> str:
     lowered = text.lower().strip()
     if lowered in {"/start", "/help", "start", "help"}:
         return WELCOME_MESSAGE
     if lowered.startswith("/lang"):
         return _handle_language(text, user)
 
+    if tenant is None:
+        # This business number isn't linked to any tenant's knowledge.
+        return (
+            "This WhatsApp number isn't connected to an assistant yet. "
+            "Please contact support."
+        )
+
     try:
-        result = answer_question(text)
+        result = answer_question(text, user=tenant, language=detect_language(text))
     except RagUnavailable:
         return (
             "I cannot search our knowledge base right now. Please try again later."

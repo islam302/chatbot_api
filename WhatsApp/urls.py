@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    WhatsAppAccountViewSet,
     WhatsAppAnalyticsViewSet,
     WhatsAppMessageViewSet,
     WhatsAppSendView,
@@ -11,6 +12,7 @@ from .views import (
 )
 
 router = DefaultRouter()
+router.register("accounts", WhatsAppAccountViewSet, basename="whatsapp-account")
 router.register("users", WhatsAppUserViewSet, basename="whatsapp-user")
 router.register("sessions", WhatsAppSessionViewSet, basename="whatsapp-session")
 router.register("messages", WhatsAppMessageViewSet, basename="whatsapp-message")

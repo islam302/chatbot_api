@@ -1,8 +1,47 @@
 from django.db import models
-from django.contrib.auth.models import User
+from django.conf import settings
 from django.utils import timezone
 from django.core.validators import MinLengthValidator, MaxLengthValidator
 import uuid
+
+
+class WhatsAppAccount(models.Model):
+    """Links a tenant (knowledge owner) to a WhatsApp Business number.
+
+    Incoming webhook messages carry the business ``phone_number_id``; we map it
+    to a tenant so the bot answers from THAT tenant's knowledge, and we send
+    replies using this account's number/token. This is what makes WhatsApp
+    multi-tenant: any user can have their own WhatsApp bot.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="whatsapp_account",
+        help_text="The tenant whose knowledge answers on this number.",
+    )
+    phone_number_id = models.CharField(
+        max_length=64, unique=True, db_index=True,
+        help_text="Meta WhatsApp Business phone-number id that receives messages.",
+    )
+    access_token = models.TextField(
+        blank=True, default="",
+        help_text="Per-number send token; blank falls back to WHATSAPP_ACCESS_TOKEN.",
+    )
+    display_name = models.CharField(max_length=120, blank=True, default="")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "whatsapp_accounts"
+        verbose_name = "WhatsApp Account"
+        verbose_name_plural = "WhatsApp Accounts"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.display_name or self.phone_number_id} -> {self.tenant}"
 
 
 class WhatsAppUser(models.Model):
