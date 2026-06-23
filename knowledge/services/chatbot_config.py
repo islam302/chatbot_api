@@ -168,7 +168,13 @@ def build_no_data_prompt(question: str, cfg: ResolvedConfig) -> str:
         f"help.\n"
         f"- If it's a greeting, thanks, or small talk, respond warmly and naturally.\n"
         f"- Otherwise, kindly say it's outside what we can help with here, and offer to help.\n"
-        f"Speak as \"we/our\". Do NOT make up any product, price, name, or detail."
+        f"Speak as \"we/our\". Do NOT make up any product, price, name, or detail"
+        + (
+            ". Do NOT invent or guess a company/organization name — you don't have one to "
+            "share, so just say you're an assistant here to help."
+            if not org_name
+            else "."
+        )
     )
 
 

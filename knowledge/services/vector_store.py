@@ -22,7 +22,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from django.conf import settings
-from django.db import connection
+from django.db import connection, transaction
 
 from ..models import DocumentChunk
 
@@ -148,9 +148,13 @@ class PgVectorStore:
         params.append(fetch_k)
 
         try:
-            with connection.cursor() as cur:
-                cur.execute(sql, params)
-                rows = cur.fetchall()
+            # Savepoint so a failure (e.g. the embedding_vec column is missing)
+            # rolls back cleanly and the numpy fallback can still run — otherwise
+            # the aborted transaction poisons later queries on Postgres.
+            with transaction.atomic():
+                with connection.cursor() as cur:
+                    cur.execute(sql, params)
+                    rows = cur.fetchall()
         except Exception as exc:  # column/extension missing, etc.
             raise VectorBackendUnavailable(str(exc)) from exc
 
