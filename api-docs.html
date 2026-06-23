@@ -210,6 +210,7 @@
 
     <h4>WhatsApp</h4>
     <a href="#wa-webhook">Webhook</a>
+    <a href="#wa-accounts">Accounts (multi-tenant)</a>
     <a href="#wa-send">Send message</a>
     <a href="#wa-data">Read-only data</a>
 
@@ -726,12 +727,15 @@ fall back to the default free-tier limits.</p>
 <h2 id="whatsapp">WhatsApp Integration</h2>
 <p>Wraps the Meta WhatsApp Cloud API. Incoming messages are routed through the RAG chat pipeline.</p>
 
+<p><strong>Multi-tenant:</strong> each business number is linked to a tenant via a <a href="#wa-accounts">WhatsApp account</a>. When a message arrives, the webhook resolves the tenant from the receiving number's <code>phone_number_id</code> and answers from <strong>that tenant's</strong> knowledge (and replies from that number). An unlinked number gets a friendly "not connected" message — never another tenant's data. The <code>WHATSAPP_TENANT</code> env var sets a single default tenant if you don't use accounts.</p>
+
 <h4>Configuration (<code>.env</code>)</h4>
 <table>
   <tr><th>Variable</th><th>Notes</th></tr>
-  <tr><td><code>WHATSAPP_ACCESS_TOKEN</code></td><td>Long-lived Meta access token</td></tr>
-  <tr><td><code>WHATSAPP_PHONE_NUMBER_ID</code></td><td>Phone-number id to send from</td></tr>
+  <tr><td><code>WHATSAPP_ACCESS_TOKEN</code></td><td>Default Meta access token (used when an account has no per-number token)</td></tr>
+  <tr><td><code>WHATSAPP_PHONE_NUMBER_ID</code></td><td>Default phone-number id to send from</td></tr>
   <tr><td><code>WHATSAPP_VERIFY_TOKEN</code></td><td>Shared secret you also enter in the Meta console</td></tr>
+  <tr><td><code>WHATSAPP_TENANT</code></td><td>Optional: username of a single default tenant (when not using per-number accounts)</td></tr>
 </table>
 
 <p>Webhook callback URL to register with Meta:</p>
@@ -750,6 +754,20 @@ fall back to the default free-tier limits.</p>
     <p>Receives incoming events: parses the message, <code>get_or_create</code>s the user + 24-h session, logs it, routes the text to RAG chat (with <code>/help</code> and <code>/lang &lt;code&gt;</code> slash-commands), replies via Meta, and logs the outgoing message. Always returns <code>200</code> to Meta.</p>
   </div>
 </div>
+
+<h3 id="wa-accounts">WhatsApp accounts — link a number to a tenant <span class="badge staff" style="margin-left:6px">admin</span></h3>
+<p>Connect any user's WhatsApp Business number so their bot answers from their own knowledge. CRUD on <code>/api/v1/whatsapp/accounts/</code> (admin only).</p>
+<pre><code>// POST /api/v1/whatsapp/accounts/   — link a number to a tenant
+{
+  "tenant": "&lt;user_id&gt;",
+  "phone_number_id": "1234567890",     // from Meta (the business number)
+  "display_name": "Acme Bot",
+  "access_token": "EAAG…"              // optional per-number send token (write-only; falls back to env)
+}
+
+// GET /api/v1/whatsapp/accounts/        list / search (?search=, ?tenant=)
+// PATCH/DELETE /api/v1/whatsapp/accounts/&lt;id&gt;/   edit / unlink</code></pre>
+<p>Response never echoes <code>access_token</code>. One account per tenant. After linking, messages to that number answer from the tenant's data automatically.</p>
 
 <div class="ep" id="wa-send">
   <div class="ep-head"><span class="method m-post">POST</span><span class="path">/api/v1/whatsapp/send/</span><span class="badge auth">auth</span></div>
