@@ -32,7 +32,7 @@ DEBUG = _env_bool("DEBUG", default=False)
 
 ALLOWED_HOSTS = _env_list(
     "ALLOWED_HOSTS",
-    default=["localhost", "127.0.0.1"],
+    default=["localhost", "127.0.0.1","una-ai-tools-apis.una-oic.org"],
 )
 
 CORS_ALLOWED_ORIGINS = _env_list(
