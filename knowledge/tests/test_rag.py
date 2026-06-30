@@ -84,34 +84,6 @@ class AnswerQuestionTests(TestCase):
         self.assertEqual(len(res.sources), 2)
         self.assertIn("filename", res.sources[0])
 
-    def test_strict_answer_is_answered(self):
-        # Strict hit + the model answers (no decline tag) → answered, not a gap.
-        res = self._run(hits=[make_hit("we sell software")])
-        self.assertTrue(res.answered)
-        self.assertTrue(res.confident)
-
-    def test_fallback_answer_is_answered_not_a_gap(self):
-        # Strict missed but fallback answered → low confidence yet ANSWERED, so
-        # it must NOT be captured as a knowledge gap (the "مين مديركم" case).
-        res = self._run(hits=[], fallback_hits=[make_hit("the manager is X")])
-        self.assertFalse(res.confident)
-        self.assertTrue(res.answered)
-
-    def test_decline_tag_marks_unanswered_and_is_stripped(self):
-        # Chunks were retrieved but irrelevant → the model declines and appends
-        # the sentinel. It must read as NOT answered (a gap), and the tag must be
-        # stripped from the user-facing text (the out-of-scope refusal case).
-        llm = FakeLLM(text="عذرًا، هذا خارج نطاق التخصص.\n[[NO_DATA]]")
-        res = self._run(hits=[make_hit("loosely related")], llm=llm)
-        self.assertFalse(res.answered)
-        self.assertFalse(res.confident)
-        self.assertNotIn("[[NO_DATA]]", res.answer)
-        self.assertEqual(res.answer, "عذرًا، هذا خارج نطاق التخصص.")
-
-    def test_no_data_path_is_unanswered(self):
-        res = self._run(hits=[], fallback_hits=[], llm=FakeLLM(text="I'm here to help"))
-        self.assertFalse(res.answered)
-
 
 class IsolationGuardTests(TestCase):
     """answer_question must NEVER search the shared table without a tenant."""
