@@ -287,6 +287,9 @@ RAG_VECTOR_BACKEND = os.getenv("RAG_VECTOR_BACKEND", "numpy").lower()
 # Max conversation turns kept in a chat `history` (1 turn = user + assistant).
 CHAT_MAX_HISTORY_TURNS = int(os.getenv("CHAT_MAX_HISTORY_TURNS", "10"))
 
+# Capture questions the bot couldn't answer (AI-filtered) as knowledge gaps.
+UNANSWERED_CAPTURE = _env_bool("UNANSWERED_CAPTURE", default=True)
+
 # --- Multi-tenancy: per-tenant default quotas --------------------------------
 # A "tenant" is a User. These are the DEFAULTS; any tenant can be given its own
 # limits via a TenantQuota row (null fields on that row fall back to these).

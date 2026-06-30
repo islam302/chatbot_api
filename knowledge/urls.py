@@ -6,12 +6,14 @@ from .views import (
     ChatbotConfigView,
     ChatFeedbackAPIView,
     SyncAPIContentView,
+    UnansweredQuestionViewSet,
     UploadedDocumentViewSet,
     UsageAnalyticsView,
 )
 
 router = DefaultRouter()
 router.register("documents", UploadedDocumentViewSet, basename="document")
+router.register("unanswered-questions", UnansweredQuestionViewSet, basename="unanswered-question")
 
 urlpatterns = [
     path("chat/", ChatAPIView.as_view(), name="chat"),

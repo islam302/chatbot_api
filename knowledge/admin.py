@@ -5,9 +5,18 @@ from .models import (
     ChatFeedback,
     DocumentChunk,
     TenantQuota,
+    UnansweredQuestion,
     UploadedDocument,
     UsageRecord,
 )
+
+
+@admin.register(UnansweredQuestion)
+class UnansweredQuestionAdmin(admin.ModelAdmin):
+    list_display = ("question", "user", "status", "occurrences", "language", "last_asked_at")
+    list_filter = ("status", "language")
+    search_fields = ("question", "user__username")
+    readonly_fields = ("id", "question_key", "created_at", "updated_at")
 
 
 @admin.register(ChatbotConfig)
