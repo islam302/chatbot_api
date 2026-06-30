@@ -283,6 +283,11 @@ RAG_MMR_LAMBDA = float(os.getenv("RAG_MMR_LAMBDA", "0.6"))
 RAG_SCAN_BATCH = int(os.getenv("RAG_SCAN_BATCH", "2000"))
 # Vector search backend: "numpy" (works everywhere) or "pgvector" (Postgres + index).
 RAG_VECTOR_BACKEND = os.getenv("RAG_VECTOR_BACKEND", "numpy").lower()
+# Relevance FLOOR for the no-strict-match fallback. If even the nearest chunk
+# scores below this, the question is treated as off-topic: the bot REFUSES
+# (never answers from outside its data) and the question becomes a knowledge gap.
+# Raise it to be stricter (more refusals), lower it to answer more broadly.
+RAG_FALLBACK_MIN_SCORE = float(os.getenv("RAG_FALLBACK_MIN_SCORE", "0.28"))
 
 # Max conversation turns kept in a chat `history` (1 turn = user + assistant).
 CHAT_MAX_HISTORY_TURNS = int(os.getenv("CHAT_MAX_HISTORY_TURNS", "10"))
