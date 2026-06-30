@@ -196,6 +196,7 @@
     <a href="#upload-word">Upload Word file</a>
     <a href="#sync-api">API content sync</a>
     <a href="#chatbot-config">Chatbot config</a>
+    <a href="#unanswered">Knowledge gaps</a>
 
     <h4>Chat</h4>
     <a href="#chat">Chat (RAG)</a>
@@ -575,6 +576,28 @@ fall back to the default free-tier limits.</p>
     <p>A config row is created on first access. Send a partial body to <code>PATCH</code> only the fields you want to change.</p>
   </div>
 </div>
+
+<h3 id="unanswered">Knowledge gaps (unanswered questions) — <code>/api/v1/unanswered-questions/</code> <span class="badge auth" style="margin-left:6px">auth</span></h3>
+<p>When the bot can't answer a question from your data (a non-confident answer), the question is captured as a <strong>knowledge gap</strong> — but only after an AI filter keeps the ones that are <strong>in your domain</strong> and <strong>worth answering</strong> (greetings, tests and off-topic questions are dropped). Review these to find what to add to your knowledge base. Capture runs in the background, so chat stays fast. Scoped to your own tenant.</p>
+<table>
+  <tr><th>Method</th><th>Path</th><th>Notes</th></tr>
+  <tr><td><code>GET</code></td><td><code>/unanswered-questions/</code></td><td>List. Filter <code>?status=new|reviewed|answered|dismissed</code>, search <code>?search=</code>, order <code>?ordering=-occurrences</code></td></tr>
+  <tr><td><code>GET</code></td><td><code>/unanswered-questions/&lt;id&gt;/</code></td><td>One gap</td></tr>
+  <tr><td><code>PATCH</code></td><td><code>/unanswered-questions/&lt;id&gt;/</code></td><td>Update <code>status</code> only (review workflow)</td></tr>
+  <tr><td><code>DELETE</code></td><td><code>/unanswered-questions/&lt;id&gt;/</code></td><td>Remove</td></tr>
+</table>
+<h4>Object shape</h4>
+<pre><code>{
+  "id": "…",
+  "question": "Do you support PostgreSQL backups?",
+  "language": "en",
+  "reason": "In-domain technical question worth answering",   // why the AI kept it
+  "status": "new",                 // new | reviewed | answered | dismissed
+  "occurrences": 3,                // how many times it was asked
+  "last_asked_at": "…",
+  "created_at": "…"
+}</code></pre>
+<p>Rows are created by the system (not via <code>POST</code> → <code>405</code>). Toggle the whole feature with <code>UNANSWERED_CAPTURE</code> (env).</p>
 
 <!-- =============================================== CHAT =============================================== -->
 
