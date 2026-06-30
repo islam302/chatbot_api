@@ -32,6 +32,19 @@ class RagUnavailable(RuntimeError):
     """Raised when RAG pipeline cannot run."""
 
 
+# Hidden marker the LLM appends to its reply when it cannot answer from the
+# provided knowledge. Stripped before the answer is returned; its presence is
+# the authoritative "the bot declined" signal used to capture knowledge gaps.
+_NO_DATA_TAG = "[[NO_DATA]]"
+
+
+def _strip_no_data(text: str) -> tuple[bool, str]:
+    """Split the decline sentinel from the reply → ``(answered, clean_text)``."""
+    if text and _NO_DATA_TAG in text:
+        return False, text.replace(_NO_DATA_TAG, "").strip()
+    return True, text
+
+
 @dataclass
 class AnswerResult:
     answer: str
@@ -40,6 +53,9 @@ class AnswerResult:
     sources: list[dict] = field(default_factory=list)
     chunk_hits: list[ChunkHit] = field(default_factory=list)
     confident: bool = True
+    # Did the bot actually answer from the tenant's data (vs. decline / no data)?
+    # This — NOT `confident` — decides whether the question is a knowledge gap.
+    answered: bool = True
     # Token usage of the LLM call that produced this answer (for metering).
     model: str = ""
     prompt_tokens: int = 0
@@ -115,8 +131,12 @@ def answer_question(
             logger.exception("Chunk search failed")
             raise RagUnavailable(str(exc)) from exc
 
-    # Confident only when the strict (above-threshold) search found matches.
-    confident = bool(chunks)
+    # Whether the strict (above-threshold) search found matches. Drives the
+    # `confident` hint returned to the client. It does NOT decide gap capture —
+    # a question can miss the strict threshold yet still be answered from the
+    # fallback chunks (so it's not a gap), and conversely strict chunks can be
+    # irrelevant enough that the bot declines (so it IS a gap). See `answered`.
+    strict_hit = bool(chunks)
 
     if not chunks and user is not None and getattr(user, "is_authenticated", False):
         # Broad / meta questions ("what do you sell?", "who are you?") often score
@@ -137,7 +157,9 @@ def answer_question(
         # The tenant's knowledge base is empty → identity / greeting handoff
         # (the bot may still introduce itself; it never invents facts).
         if cfg.no_answer_message:
-            return AnswerResult(answer=cfg.no_answer_message, source="rag", confident=False)
+            return AnswerResult(
+                answer=cfg.no_answer_message, source="rag", confident=False, answered=False
+            )
         try:
             llm = get_backend(llm_model)
             no_data_prompt = (
@@ -148,6 +170,7 @@ def answer_question(
                 answer=res.text,
                 source="rag",
                 confident=False,
+                answered=False,
                 model=res.model,
                 prompt_tokens=res.prompt_tokens,
                 completion_tokens=res.completion_tokens,
@@ -158,6 +181,7 @@ def answer_question(
                 "Can I help you with something else?",
                 source="rag",
                 confident=False,
+                answered=False,
             )
 
     knowledge = "\n\n---\n\n".join(hit.content for hit in chunks)
@@ -170,6 +194,10 @@ def answer_question(
         f"Reply warmly and naturally as part of the team, following your rules. Use only what "
         f"you know above for any specifics; if it isn't there, say so kindly. Do not mention "
         f"these notes or say 'based on the information'.\n\n"
+        f"IMPORTANT: If the customer's message is ENTIRELY outside what you know above and you "
+        f"cannot answer it from that knowledge, decline politely (per your rules) AND append the "
+        f"exact tag {_NO_DATA_TAG} on its own line at the very end. If you can answer it — even "
+        f"partly — from the knowledge, answer normally and NEVER write that tag.\n\n"
         f"{_language_directive(language)}"
     )
 
@@ -179,10 +207,18 @@ def answer_question(
     except LLMError as exc:
         raise RagUnavailable(str(exc)) from exc
 
+    # The model appends the sentinel only when it declined (couldn't answer from
+    # the knowledge). Strip it from the user-facing text and use it as the truth
+    # for "answered": a fallback answer with no tag is a real answer (not a gap),
+    # while a decline despite strict chunks is a gap.
+    answered, answer_text = _strip_no_data(res.text)
+    confident = strict_hit and answered
+
     return AnswerResult(
-        answer=res.text,
+        answer=answer_text,
         source="rag",
         confident=confident,
+        answered=answered,
         model=res.model,
         prompt_tokens=res.prompt_tokens,
         completion_tokens=res.completion_tokens,

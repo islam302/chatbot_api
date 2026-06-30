@@ -93,7 +93,7 @@ Rotate: `POST /users/regenerate-api-key/`.
 }
 ```
 - `answer` may contain **Markdown** (render links/lists).
-- `confident: false` → optionally show a subtle "not sure" hint.
+- `confident: false` → a weak/fallback answer; optionally show a subtle "not sure" hint. (Note: a fallback answer is still a real answer — only questions the bot actually *declines* become knowledge gaps, §7.)
 - Errors: `401` auth · `403` suspended/expired · `429` rate/quota · `503` LLM down.
 
 ```js
@@ -177,25 +177,37 @@ Grounding/safety rules are server-enforced and **not** configurable. `PATCH` onl
 ---
 
 ## 7. Knowledge gaps (unanswered questions) — `/unanswered-questions/`
-Questions the bot couldn't answer, **AI-filtered** to keep only in-domain, meaningful ones (greetings/tests/off-topic dropped). Scoped to your tenant. Use it to show "questions to add answers for".
+Whenever the bot **can't answer** a question from your data and **declines** it (an out-of-scope / "I don't have that" reply), the question is captured here for review. Note this is about the bot *declining* — a low-confidence (`confident: false`) answer that still answered from fallback content is **not** a gap. Capture is **AI-filtered**: the question is kept only if it is (a) **within your domain/specialization** and (b) a **genuine, meaningful** question — greetings, thanks, tests, spam and off-topic questions are dropped. The bot never invents an answer; it only *records* the gap. Capture runs in the background, so it never slows chat down. Scoped to your tenant. Use it to surface "questions you should add answers for".
+
+- Rows are **created by the system**, never via `POST` (→ `405`).
+- A repeated question isn't duplicated — its `occurrences` counter is bumped and `last_asked_at` updated. Sort by `?ordering=-occurrences` to find the most-asked gaps.
+- Work the review queue by moving each item's `status`: `new → reviewed → answered` (or `dismissed`).
 
 | Method | Path | Notes |
 |--------|------|-------|
-| `GET` | `/unanswered-questions/` | List. `?status=new\|reviewed\|answered\|dismissed`, `?search=`, `?ordering=-occurrences` |
+| `GET` | `/unanswered-questions/` | List. `?status=new\|reviewed\|answered\|dismissed`, `?search=<text>`, `?ordering=-occurrences\|-last_asked_at\|-created_at` |
 | `GET` | `/unanswered-questions/{id}/` | One |
-| `PATCH` | `/unanswered-questions/{id}/` | Update `status` only |
-| `DELETE` | `/unanswered-questions/{id}/` | Remove |
+| `PATCH` | `/unanswered-questions/{id}/` | Update `status` only (all other fields read-only) |
+| `DELETE` | `/unanswered-questions/{id}/` | Remove (`204`) |
 
 **Object:**
 ```json
 {
   "id": "…", "question": "Do you support PostgreSQL backups?", "language": "en",
-  "reason": "In-domain technical question worth answering",
+  "reason": "In-domain technical question worth answering",   // why the AI kept it
   "status": "new",            // new | reviewed | answered | dismissed
-  "occurrences": 3, "last_asked_at": "…", "created_at": "…"
+  "occurrences": 3,           // times this question was asked
+  "last_asked_at": "…", "created_at": "…"
 }
 ```
-Rows are created by the system (no `POST` → `405`).
+
+**Review queue example:**
+```js
+// most-asked open gaps
+const { results } = await api("/unanswered-questions/?status=new&ordering=-occurrences");
+// after adding content that answers it:
+await api(`/unanswered-questions/${id}/`, { method: "PATCH", body: { status: "answered" } });
+```
 
 ---
 

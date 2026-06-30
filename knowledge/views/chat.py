@@ -90,9 +90,11 @@ class ChatAPIView(APIView):
             chunk_count=len(result.sources),
         )
 
-        # Knowledge gap: if we couldn't answer confidently, capture the question
-        # for review (AI-filtered, off the request path).
-        if not result.confident:
+        # Knowledge gap: capture only when the bot actually FAILED to answer from
+        # the tenant's data (it declined / had no data). A low-confidence answer
+        # that still answered from fallback chunks is NOT a gap — so we gate on
+        # `answered`, not `confident` (AI-filtered, off the request path).
+        if not result.answered:
             from ..services.gaps import capture_unanswered
 
             capture_unanswered(request.user, question, language)
