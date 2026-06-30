@@ -119,16 +119,13 @@ def answer_question(
     confident = bool(chunks)
 
     if not chunks and user is not None and getattr(user, "is_authenticated", False):
-        # Broad / meta questions ("what do you sell?", "who are you?") often score
-        # just under the strict threshold. Fall back to the nearest chunks — but
-        # ONLY if they clear a relevance FLOOR (RAG_FALLBACK_MIN_SCORE). If even
-        # the closest chunk is below the floor, the question is genuinely off-topic:
-        # we keep `chunks` empty so the bot REFUSES (never answers from outside
-        # data) and the question is captured as a knowledge gap.
-        fallback_min = float(os.getenv("RAG_FALLBACK_MIN_SCORE", "0.28"))
+        # Broad / meta questions ("what do you sell?", "who are you?", "tell me
+        # about you") often score below the threshold. Fall back to the nearest
+        # chunks (no threshold) so the bot can still answer from its knowledge.
+        # The grounded prompt keeps it honest: it declines if truly off-topic.
         try:
             chunks = search_chunks(
-                question, top_k=resolve_top_k(cfg), threshold=fallback_min, user=user
+                question, top_k=resolve_top_k(cfg), threshold=0.0, user=user
             )
         except Exception:
             chunks = []
