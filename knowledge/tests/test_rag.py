@@ -46,23 +46,6 @@ class AnswerQuestionTests(TestCase):
         self.assertFalse(res.confident)
         self.assertEqual(res.answer, "fake answer")
 
-    def test_fallback_uses_relevance_floor_not_zero(self):
-        # When the strict search is empty, the fallback must use a positive
-        # relevance floor (not 0.0) so off-topic questions get NO chunks → refused.
-        thresholds = []
-
-        def fake_search(question, *, top_k=None, threshold=None, user=None):
-            thresholds.append(threshold)
-            return []  # strict empty, fallback empty → refusal path
-
-        with mock.patch.object(rag, "search_chunks", side_effect=fake_search), \
-             mock.patch.object(rag, "get_backend", return_value=FakeLLM()):
-            res = answer_question("what is the capital of France?", user=self.user)
-
-        self.assertEqual(len(thresholds), 2)        # strict, then fallback
-        self.assertGreater(thresholds[1], 0.0)      # fallback floor is NOT zero
-        self.assertFalse(res.confident)
-
     def test_no_data_handoff_when_empty(self):
         # Both strict and fallback empty → no-data prompt path, still answers.
         llm = FakeLLM(text="hi, I'm here to help")

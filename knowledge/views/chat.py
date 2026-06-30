@@ -90,13 +90,6 @@ class ChatAPIView(APIView):
             chunk_count=len(result.sources),
         )
 
-        # Knowledge gap: if we couldn't answer confidently, capture the question
-        # for review (AI-filtered, off the request path).
-        if not result.confident:
-            from ..services.gaps import capture_unanswered
-
-            capture_unanswered(request.user, question, language)
-
         cost = quota.estimate_cost(
             result.model, result.prompt_tokens, result.completion_tokens
         )

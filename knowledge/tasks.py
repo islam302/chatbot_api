@@ -29,17 +29,3 @@ def ingest_document_task(self, document_id):
 
     result = ingest_document(document)
     return {"document_id": str(document_id), "chunks_created": getattr(result, "chunks_created", 0)}
-
-
-@shared_task
-def record_unanswered_question_task(user_id, question, language=""):
-    """Background: AI-filter and store a question the bot couldn't answer."""
-    from django.contrib.auth import get_user_model
-
-    from .services.gaps import record_unanswered
-
-    user = get_user_model().objects.filter(pk=user_id).first()
-    if user is None:
-        return None
-    obj = record_unanswered(user, question, language)
-    return {"saved": obj is not None, "id": str(obj.id) if obj else None}
