@@ -164,9 +164,11 @@ def answer_question(
         f"Conversation so far:\n{history_text or '(None)'}\n\n"
         f"What you know:\n{knowledge}\n\n"
         f"Customer's message: {question}\n\n"
-        f"Reply warmly and naturally as part of the team, following your rules. Use only what "
-        f"you know above for any specifics; if it isn't there, say so kindly. Do not mention "
-        f"these notes or say 'based on the information'.\n\n"
+        f"Reply naturally as part of the team, following your rules. Answer directly — do NOT "
+        f"open with a greeting (مرحبا/أهلاً/hello) or re-introduce yourself unless the customer's "
+        f"message above is itself a greeting. Use only what you know above for any specifics; if "
+        f"it isn't there, say so kindly. Do not mention these notes or say 'based on the "
+        f"information'.\n\n"
         f"{_language_directive(language)}"
     )
 

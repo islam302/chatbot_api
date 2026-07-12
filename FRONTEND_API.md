@@ -136,7 +136,7 @@ async function ask(question, history) {
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
     body: JSON.stringify({ question, history: history.slice(-20) }),
   });
-  if (!res.ok) throw await res.json();   // see §8 for error shapes
+  if (!res.ok) throw await res.json();   // see §9 for error shapes
   return res.json();
 }
 ```
@@ -198,7 +198,7 @@ show `error_message`). Then `chunk_count` is the number of searchable pieces.
 ### Re-index — `POST /documents/{id}/reindex/`  → `202` (re-embeds the document)
 
 > Limits per tenant: **100 documents / 200 MB / 20 MB per file** by default.
-> Over the limit returns **413** (see §8).
+> Over the limit returns **413** (see §9).
 
 ---
 
@@ -246,7 +246,67 @@ Admins can pass `?scope=all` for a per-tenant breakdown.
 
 ---
 
-## 8. Error handling
+## 8. Unanswered questions (knowledge gaps)
+
+When the bot can't confidently answer (`confident: false`), the question is
+captured for that tenant as a **knowledge gap** — after an AI filter drops
+noise (greetings, chit-chat) and de-duplicates repeats. Build a review UI so
+the tenant can see what customers ask that the bot can't answer yet, and fill
+those gaps.
+
+> No create endpoint — rows are produced automatically by the chat pipeline.
+> All endpoints are scoped to the authenticated tenant.
+
+### List — `GET /unanswered/`
+Paginated, most-frequent first. Each item:
+```json
+{
+  "id": "9c1e...",
+  "question": "Do you offer refunds on annual plans?",
+  "question_key": "do you offer refunds on annual plans",
+  "language": "en",
+  "reason": "asks about refund policy",
+  "status": "new",              // new | reviewed | answered | dismissed
+  "occurrences": 4,
+  "last_asked_at": "2026-07-12T09:10:00Z",
+  "created_at": "2026-07-10T14:00:00Z"
+}
+```
+| Field | Meaning |
+|-------|---------|
+| `occurrences` | How many times this gap was asked (dedup counter). Sort by this to prioritise. |
+| `reason` | Why the AI filter kept it as a real question. |
+| `status` | Review state you control (see below). |
+
+Filters: `?status=new`, `?language=ar`, `?search=<text>`,
+`?ordering=-occurrences` (also `last_asked_at`, `created_at`).
+
+### Retrieve — `GET /unanswered/{id}/`
+
+### Re-triage — `PATCH /unanswered/{id}/`
+Only `status` is writable:
+```json
+{ "status": "reviewed" }
+```
+
+### Resolve into knowledge — `POST /unanswered/{id}/resolve/`
+Provide an answer and it is **embedded into the tenant's knowledge**, so the bot
+retrieves it the next time the question is asked; the gap is marked `answered`.
+```json
+{ "answer": "Yes, we refund annual plans within 14 days of purchase." }
+```
+Send an **empty body** to just mark it `answered` without adding knowledge.
+Returns the updated row. (May return `503` if embedding is temporarily
+unavailable — see §9.)
+
+### Dismiss — `POST /unanswered/{id}/dismiss/`
+Marks the gap `dismissed` (not worth answering).
+
+### Delete — `DELETE /unanswered/{id}/`  → `204`
+
+---
+
+## 9. Error handling
 
 Errors return JSON `{ "detail": "..." }` (or field errors for 400 validation).
 
@@ -273,7 +333,7 @@ if (!res.ok) {
 
 ---
 
-## 9. Admin endpoints (only if you build an admin panel)
+## 10. Admin endpoints (only if you build an admin panel)
 
 Require an **admin** token. Highlights:
 - `POST /users/` — create a tenant (returns the new user + `api_key`).
@@ -284,7 +344,7 @@ Require an **admin** token. Highlights:
 
 ---
 
-## 10. Minimal client wrapper (copy-paste starter)
+## 11. Minimal client wrapper (copy-paste starter)
 
 ```js
 const BASE = "https://una-ai-tools-apis.una-oic.org/chatbot-api/api/v1";

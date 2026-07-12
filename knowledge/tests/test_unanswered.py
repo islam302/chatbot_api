@@ -149,6 +149,20 @@ class ClassifyGapTests(APITestCase):
             v = unanswered.classify_gap("anything")
         self.assertTrue(v.keep)  # never silently drop a real gap on outage
 
+    def test_history_is_passed_to_the_filter(self):
+        backend = mock.Mock()
+        backend.complete.return_value = "NO: context-dependent follow-up"
+        history = [
+            {"role": "user", "content": "do you sell IDM?"},
+            {"role": "assistant", "content": "Yes, we do."},
+        ]
+        with mock.patch("knowledge.services.unanswered.get_backend", return_value=backend):
+            unanswered.classify_gap("how much is it?", history=history)
+        # The recent conversation is included so the model can see the fragment's context.
+        sent_prompt = backend.complete.call_args.args[1]
+        self.assertIn("do you sell IDM?", sent_prompt)
+        self.assertIn("how much is it?", sent_prompt)
+
 
 class ChatWiringTests(APITestCase):
     def setUp(self):
@@ -161,13 +175,19 @@ class ChatWiringTests(APITestCase):
         )
 
     def test_low_confidence_answer_triggers_capture(self):
+        history = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"},
+        ]
         with mock.patch.object(
             chat_view, "answer_question", return_value=_fake_answer(confident=False)
         ), mock.patch.object(chat_view, "dispatch_capture") as cap:
-            res = self._post({"question": "obscure question"})
+            res = self._post({"question": "obscure question", "history": history})
         self.assertEqual(res.status_code, 200)
         cap.assert_called_once()
         self.assertEqual(cap.call_args.kwargs["question"], "obscure question")
+        # Conversation context is forwarded so the filter can drop follow-ups.
+        self.assertEqual(cap.call_args.kwargs["history"], history)
 
     def test_confident_answer_does_not_capture(self):
         with mock.patch.object(

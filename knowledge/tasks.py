@@ -32,7 +32,7 @@ def ingest_document_task(self, document_id):
 
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=10)
-def capture_unanswered_task(self, user_id, question, language=""):
+def capture_unanswered_task(self, user_id, question, language="", history=None):
     """Filter + record a low-confidence chat question as a knowledge gap."""
     from django.contrib.auth import get_user_model
 
@@ -44,5 +44,5 @@ def capture_unanswered_task(self, user_id, question, language=""):
         logger.error("capture_unanswered_task: user %s no longer exists", user_id)
         return None
 
-    obj = capture_unanswered(user=user, question=question, language=language)
+    obj = capture_unanswered(user=user, question=question, language=language, history=history)
     return {"captured": bool(obj), "id": str(obj.pk) if obj else None}

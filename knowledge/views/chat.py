@@ -94,7 +94,9 @@ class ChatAPIView(APIView):
         # The bot couldn't confidently answer → record it as a knowledge gap
         # (AI-filtered + de-duplicated off the request path). Never blocks the reply.
         if not result.confident:
-            dispatch_capture(user=request.user, question=question, language=language)
+            dispatch_capture(
+                user=request.user, question=question, language=language, history=history
+            )
 
         cost = quota.estimate_cost(
             result.model, result.prompt_tokens, result.completion_tokens

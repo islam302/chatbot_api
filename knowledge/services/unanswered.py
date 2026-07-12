@@ -71,26 +71,50 @@ class GapVerdict:
 
 _FILTER_SYSTEM = (
     "You triage messages a support chatbot could not answer, to build a list of "
-    "knowledge gaps for the business to fill. Your bias is to KEEP: if a message "
-    "is any real request for information a customer might reasonably ask a "
-    "business, answer YES. This INCLUDES products, services, policies, refunds, "
+    "knowledge gaps for the business to fill. KEEP only SELF-CONTAINED questions "
+    "that clearly name what they are about and that a business should be able to "
+    "answer from its own knowledge (products, services, policies, refunds, "
     "returns, warranties, pricing, discounts, hours, locations, shipping, "
-    "booking, account, technical how-to, and support questions. Do NOT reject a "
-    "message just because it is about a policy rather than a product. "
-    "Answer NO ONLY for: greetings, thanks, small talk, one-word/test messages, "
-    "gibberish, or abuse. When in doubt, answer YES. "
-    "Reply with ONLY 'YES: <short reason>' or 'NO: <short reason>'."
+    "booking, account, technical how-to, support). "
+    "Answer NO for: greetings, thanks, small talk, one-word/test messages, "
+    "gibberish, or abuse. ALSO answer NO for messages that only make sense as a "
+    "follow-up to the conversation: clarifications and meta questions (e.g. 'what "
+    "did I ask?', 'what do you mean?', 'which one?', 'انا سألت عن ايه؟'), and "
+    "fragments that refer to something earlier by a pronoun ('it', 'this', "
+    "'that', 'دي', 'ده', 'هو', 'هي') without naming a concrete subject (e.g. "
+    "'when is it available?', 'امتا هيتوفر', 'how much is it?'). "
+    "The recent conversation is given ONLY to judge whether the latest message is "
+    "self-contained — do NOT keep a fragment just because the context reveals its "
+    "subject. When in doubt about a clearly self-contained business question, "
+    "answer YES. Reply with ONLY 'YES: <short reason>' or 'NO: <short reason>'."
 )
 
 
-def classify_gap(question: str, language: str = "") -> GapVerdict:
-    """AI filter: is this a real knowledge gap worth capturing?
+def _render_history_for_filter(history, max_turns: int = 4) -> str:
+    if not history:
+        return ""
+    lines: list[str] = []
+    for msg in list(history)[-max_turns * 2:]:
+        content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+        who = "User" if msg.get("role", "user") == "user" else "Assistant"
+        lines.append(f"{who}: {content}")
+    return "\n".join(lines)
+
+
+def classify_gap(question: str, language: str = "", history=None) -> GapVerdict:
+    """AI filter: is this a self-contained knowledge gap worth capturing?
 
     Fails OPEN (keep=True) on LLM errors so a provider hiccup never silently
     drops real gaps; the reviewer can still dismiss noise. Returns keep=False
     only when the model explicitly rejects the message.
     """
-    prompt = f"Message (language={language or 'unknown'}):\n{question}"
+    convo = _render_history_for_filter(history)
+    prompt = (
+        f"Recent conversation (context only):\n{convo or '(none)'}\n\n"
+        f"Latest message to judge (language={language or 'unknown'}):\n{question}"
+    )
     try:
         llm = get_backend()
         text = llm.complete(_FILTER_SYSTEM, prompt).strip()
@@ -106,17 +130,20 @@ def classify_gap(question: str, language: str = "") -> GapVerdict:
     return GapVerdict(keep=keep, reason=reason.strip()[:500])
 
 
-def capture_unanswered(*, user, question: str, language: str = "") -> UnansweredQuestion | None:
+def capture_unanswered(
+    *, user, question: str, language: str = "", history=None
+) -> UnansweredQuestion | None:
     """Filter, then record/increment a knowledge gap for ``user``.
 
     Returns the row (created or bumped), or ``None`` when the AI filter rejected
-    the message or the input was empty. Safe to call synchronously in tests.
+    the message or the input was empty. ``history`` (recent turns) lets the filter
+    drop context-dependent follow-ups. Safe to call synchronously in tests.
     """
     key = normalize_question(question)
     if not key:
         return None
 
-    verdict = classify_gap(question, language)
+    verdict = classify_gap(question, language, history=history)
     if not verdict.keep:
         logger.info(
             "Dropped non-gap message for user %s: %r (reason: %s)",
@@ -146,40 +173,41 @@ def capture_unanswered(*, user, question: str, language: str = "") -> Unanswered
     return obj
 
 
-def _run_in_thread(user_id, question, language) -> None:
+def _run_in_thread(user_id, question, language, history) -> None:
     from django.contrib.auth import get_user_model
     from django.db import connection
 
     try:
         user = get_user_model().objects.get(pk=user_id)
-        capture_unanswered(user=user, question=question, language=language)
+        capture_unanswered(user=user, question=question, language=language, history=history)
     except Exception:
         logger.exception("Background unanswered capture failed for user %s", user_id)
     finally:
         connection.close()
 
 
-def dispatch_capture(*, user, question: str, language: str = "") -> None:
+def dispatch_capture(*, user, question: str, language: str = "", history=None) -> None:
     """Record a knowledge gap per ``UNANSWERED_CAPTURE_MODE``; never raises.
 
     The AI filter adds an LLM round-trip, so production should run this off the
     request path (``thread`` or ``celery``). ``sync`` keeps tests deterministic.
+    ``history`` is passed to the filter so context-dependent follow-ups are dropped.
     """
     mode = getattr(settings, "UNANSWERED_CAPTURE_MODE", "sync").lower()
     try:
         if mode == "celery":
             from ..tasks import capture_unanswered_task
 
-            capture_unanswered_task.delay(str(user.pk), question, language)
+            capture_unanswered_task.delay(str(user.pk), question, language, history)
             return
         if mode == "thread":
             threading.Thread(
                 target=_run_in_thread,
-                args=(user.pk, question, language),
+                args=(user.pk, question, language, history),
                 daemon=True,
             ).start()
             return
-        capture_unanswered(user=user, question=question, language=language)
+        capture_unanswered(user=user, question=question, language=language, history=history)
     except Exception:
         # Capturing a gap must never break the chat reply.
         logger.exception("dispatch_capture failed for user %s", getattr(user, "pk", None))
