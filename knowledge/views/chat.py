@@ -14,6 +14,7 @@ from ..serializers import (
 )
 from ..services import quota
 from ..services.rag import RagUnavailable, answer_question
+from ..services.unanswered import dispatch_capture
 
 # Chat is multi-tenant: authenticate with the tenant's API key (or a JWT) so the
 # answer is scoped to that user's own knowledge and chatbot config.
@@ -89,6 +90,11 @@ class ChatAPIView(APIView):
             confident=result.confident,
             chunk_count=len(result.sources),
         )
+
+        # The bot couldn't confidently answer → record it as a knowledge gap
+        # (AI-filtered + de-duplicated off the request path). Never blocks the reply.
+        if not result.confident:
+            dispatch_capture(user=request.user, question=question, language=language)
 
         cost = quota.estimate_cost(
             result.model, result.prompt_tokens, result.completion_tokens

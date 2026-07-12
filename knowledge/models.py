@@ -2,6 +2,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 # User and APIKey now live in the `Authentication` app.
 
@@ -257,3 +258,58 @@ class UsageRecord(TimestampedModel):
 
     def __str__(self):
         return f"Usage({self.user_id} {self.kind} {self.tokens_in}+{self.tokens_out})"
+
+
+class UnansweredStatus(models.TextChoices):
+    NEW = "new", "New"
+    REVIEWED = "reviewed", "Reviewed"
+    ANSWERED = "answered", "Answered"
+    DISMISSED = "dismissed", "Dismissed"
+
+
+class UnansweredQuestion(TimestampedModel):
+    """A question the bot could not confidently answer — a knowledge gap.
+
+    Captured (per tenant) when a chat turn comes back low-confidence AND an AI
+    filter judges it a genuine question the business should be able to answer
+    (greetings/chit-chat/off-topic are dropped; the kept reason is stored).
+
+    De-duplicated per tenant on ``question_key`` (a normalised form of the
+    question), so the same gap asked many ways bumps ``occurrences`` instead of
+    creating rows. Review by frequency, then resolve into knowledge.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="unanswered_questions",
+    )
+    # The original question text (first occurrence) shown to reviewers.
+    question = models.TextField()
+    # Normalised dedup key (lowercased, punctuation stripped, whitespace collapsed).
+    question_key = models.CharField(max_length=500, db_index=True)
+    language = models.CharField(max_length=8, blank=True, default="")
+    reason = models.TextField(blank=True, default="", help_text="Why the AI kept it.")
+    status = models.CharField(
+        max_length=12,
+        choices=UnansweredStatus.choices,
+        default=UnansweredStatus.NEW,
+    )
+    occurrences = models.PositiveIntegerField(default=1)
+    last_asked_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-last_asked_at"]
+        indexes = [
+            models.Index(fields=["user", "status"]),
+            models.Index(fields=["user", "last_asked_at"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "question_key"], name="unique_user_question_key"
+            )
+        ]
+
+    def __str__(self):
+        return f"Unanswered({self.user_id} x{self.occurrences}: {self.question[:40]})"

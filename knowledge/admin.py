@@ -5,6 +5,7 @@ from .models import (
     ChatFeedback,
     DocumentChunk,
     TenantQuota,
+    UnansweredQuestion,
     UploadedDocument,
     UsageRecord,
 )
@@ -55,6 +56,24 @@ class TenantQuotaAdmin(admin.ModelAdmin):
     list_filter = ("is_suspended",)
     search_fields = ("user__username",)
     readonly_fields = ("id", "created_at", "updated_at")
+
+
+@admin.register(UnansweredQuestion)
+class UnansweredQuestionAdmin(admin.ModelAdmin):
+    list_display = ("question", "user", "status", "occurrences", "language", "last_asked_at")
+    list_filter = ("status", "language", "last_asked_at")
+    search_fields = ("question", "user__username")
+    readonly_fields = (
+        "id",
+        "question",
+        "question_key",
+        "language",
+        "reason",
+        "occurrences",
+        "last_asked_at",
+        "created_at",
+        "updated_at",
+    )
 
 
 @admin.register(UsageRecord)

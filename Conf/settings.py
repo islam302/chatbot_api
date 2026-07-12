@@ -320,6 +320,11 @@ EMBEDDING_PRICING = {
 #   "celery" - enqueue to a Celery worker (production; needs Redis + worker)
 INGESTION_MODE = os.getenv("INGESTION_MODE", "sync").lower()
 
+# How low-confidence chat questions are captured as knowledge gaps (same modes
+# as INGESTION_MODE). The capture runs an LLM filter, so "thread"/"celery" keep
+# it off the chat request path in production; "sync" keeps tests deterministic.
+UNANSWERED_CAPTURE_MODE = os.getenv("UNANSWERED_CAPTURE_MODE", "sync").lower()
+
 # --- Celery / Redis ---------------------------------------------------------
 # In Docker these point at the `redis` service; locally default to localhost.
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")

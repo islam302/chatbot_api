@@ -29,3 +29,20 @@ def ingest_document_task(self, document_id):
 
     result = ingest_document(document)
     return {"document_id": str(document_id), "chunks_created": getattr(result, "chunks_created", 0)}
+
+
+@shared_task(bind=True, max_retries=2, default_retry_delay=10)
+def capture_unanswered_task(self, user_id, question, language=""):
+    """Filter + record a low-confidence chat question as a knowledge gap."""
+    from django.contrib.auth import get_user_model
+
+    from .services.unanswered import capture_unanswered
+
+    try:
+        user = get_user_model().objects.get(pk=user_id)
+    except get_user_model().DoesNotExist:
+        logger.error("capture_unanswered_task: user %s no longer exists", user_id)
+        return None
+
+    obj = capture_unanswered(user=user, question=question, language=language)
+    return {"captured": bool(obj), "id": str(obj.pk) if obj else None}

@@ -8,6 +8,7 @@ from .documents import (
     UploadedDocumentSerializer,
     UploadedDocumentWriteSerializer,
 )
+from .unanswered import UnansweredQuestionSerializer
 
 __all__ = [
     "UploadedDocumentSerializer",
@@ -16,4 +17,5 @@ __all__ = [
     "ChatResponseSerializer",
     "ChatFeedbackSerializer",
     "ChatbotConfigSerializer",
+    "UnansweredQuestionSerializer",
 ]

@@ -1,0 +1,1237 @@
+{
+  "info": {
+    "name": "ChatBot API",
+    "_postman_id": "8f2c1a10-0000-4000-a000-chatbotapi001",
+    "description": "Complete Postman collection for the ChatBot API (Django REST Framework).\n\n## Base URL\nAll endpoints are under `{{base_url}}` (default `http://localhost:8000`).\n\n## Authentication\nMost endpoints accept either:\n- **JWT** – `Authorization: Bearer <access_token>`  (get one from `Auth > Login`)\n- **API key** – `X-API-Key: <api_key>`  (or `Authorization: ApiKey <api_key>`)\n\nThe collection sends the JWT (`{{access_token}}`) by default at the collection level. For the chat / knowledge / analytics endpoints you may instead use the `{{api_key}}` variable via the `X-API-Key` header (a disabled example header is included on those requests).\n\nThe **Login** request has a test script that automatically saves `access_token` and `refresh_token` into collection variables.\n\n## Admin-only endpoints\nUser management, API-key management, subscription assignment, plan writes and WhatsApp accounts require a staff/admin user.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }]
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000", "type": "string" },
+    { "key": "access_token", "value": "", "type": "string" },
+    { "key": "refresh_token", "value": "", "type": "string" },
+    { "key": "api_key", "value": "", "type": "string" },
+    { "key": "user_id", "value": "1", "type": "string" },
+    { "key": "document_id", "value": "1", "type": "string" },
+    { "key": "unanswered_id", "value": "1", "type": "string" },
+    { "key": "apikey_id", "value": "1", "type": "string" },
+    { "key": "plan_id", "value": "1", "type": "string" },
+    { "key": "subscription_id", "value": "1", "type": "string" },
+    { "key": "whatsapp_account_id", "value": "1", "type": "string" },
+    { "key": "whatsapp_user_id", "value": "1", "type": "string" },
+    { "key": "whatsapp_session_id", "value": "1", "type": "string" },
+    { "key": "whatsapp_message_id", "value": "1", "type": "string" },
+    { "key": "whatsapp_analytics_id", "value": "1", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login (obtain JWT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const data = pm.response.json();",
+                  "  if (data.access) pm.collectionVariables.set('access_token', data.access);",
+                  "  if (data.refresh) pm.collectionVariables.set('refresh_token', data.refresh);",
+                  "  if (data.user && data.user.api_key) pm.collectionVariables.set('api_key', data.user.api_key);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"password\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "login", ""]
+            },
+            "description": "Obtain a JWT access + refresh token pair. On success the test script stores `access_token`, `refresh_token`, and (if present) `api_key` into collection variables."
+          }
+        },
+        {
+          "name": "Refresh token",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/refresh/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "refresh", ""]
+            },
+            "description": "Exchange a refresh token for a new access token."
+          }
+        },
+        {
+          "name": "Verify token",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{access_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/verify/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "verify", ""]
+            },
+            "description": "Verify that a JWT is valid (returns 200 with empty body if valid)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "description": "User accounts. List/create/update/delete are admin-only; self-service actions (me, change-password, api-key, regenerate-api-key) need only authentication.",
+      "item": [
+        {
+          "name": "List users (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/?search=&ordering=username",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", ""],
+              "query": [
+                { "key": "search", "value": "", "description": "Search username/email/first_name/last_name" },
+                { "key": "ordering", "value": "username", "description": "username | email | date_joined (prefix - for desc)" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create user (admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"newuser\",\n  \"email\": \"newuser@example.com\",\n  \"first_name\": \"New\",\n  \"last_name\": \"User\",\n  \"password\": \"Str0ng-Passw0rd!\",\n  \"password_confirm\": \"Str0ng-Passw0rd!\",\n  \"plan\": \"free\",\n  \"plan_duration_days\": 30\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", ""]
+            },
+            "description": "Admin only. Creates a user, issues an API key, and optionally assigns a plan (`plan` = slug or id, `plan_duration_days` default 30). `plan` fields are optional."
+          }
+        },
+        {
+          "name": "Retrieve user (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/{{user_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "{{user_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "Update user (admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"Updated\",\n  \"last_name\": \"Name\",\n  \"email\": \"updated@example.com\",\n  \"is_active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/{{user_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "{{user_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "Delete user (admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/{{user_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "{{user_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "Create user - /create alias (admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"newuser2\",\n  \"email\": \"newuser2@example.com\",\n  \"first_name\": \"New\",\n  \"last_name\": \"User\",\n  \"password\": \"Str0ng-Passw0rd!\",\n  \"password_confirm\": \"Str0ng-Passw0rd!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/create/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "create", ""]
+            },
+            "description": "Admin only. Alias of create user."
+          }
+        },
+        {
+          "name": "Register user - /register alias (admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"newuser3\",\n  \"email\": \"newuser3@example.com\",\n  \"first_name\": \"New\",\n  \"last_name\": \"User\",\n  \"password\": \"Str0ng-Passw0rd!\",\n  \"password_confirm\": \"Str0ng-Passw0rd!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/register/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "register", ""]
+            },
+            "description": "Admin only. Alias of create user."
+          }
+        },
+        {
+          "name": "Me (current user)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/me/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "me", ""]
+            }
+          }
+        },
+        {
+          "name": "Change my password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"old_password\": \"CurrentPass123!\",\n  \"new_password\": \"NewStr0ng-Passw0rd!\",\n  \"new_password_confirm\": \"NewStr0ng-Passw0rd!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/change-password/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "change-password", ""]
+            }
+          }
+        },
+        {
+          "name": "Set user password (admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"new_password\": \"NewStr0ng-Passw0rd!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/{{user_id}}/set-password/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "{{user_id}}", "set-password", ""]
+            },
+            "description": "Admin only. Set another user's password (no old password needed)."
+          }
+        },
+        {
+          "name": "My API key",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/api-key/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "api-key", ""]
+            },
+            "description": "Get or create the current user's API key."
+          }
+        },
+        {
+          "name": "Regenerate my API key",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/regenerate-api-key/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "regenerate-api-key", ""]
+            }
+          }
+        },
+        {
+          "name": "Get user's API key (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/{{user_id}}/api-key/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "{{user_id}}", "api-key", ""]
+            },
+            "description": "Admin only."
+          }
+        },
+        {
+          "name": "Regenerate user's API key (admin)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/{{user_id}}/regenerate-api-key/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "{{user_id}}", "regenerate-api-key", ""]
+            },
+            "description": "Admin only."
+          }
+        }
+      ]
+    },
+    {
+      "name": "API Keys (admin)",
+      "description": "Admin-only control plane for API keys across all users.",
+      "item": [
+        {
+          "name": "List API keys",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/api-keys/?search=&ordering=-created_at",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "api-keys", ""],
+              "query": [
+                { "key": "search", "value": "", "description": "Search user__username / user__email" },
+                { "key": "ordering", "value": "-created_at", "description": "created_at | last_used_at | is_active" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create API key",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user\": {{user_id}},\n  \"is_active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/api-keys/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "api-keys", ""]
+            }
+          }
+        },
+        {
+          "name": "Retrieve API key",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/api-keys/{{apikey_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "api-keys", "{{apikey_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "Delete API key",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/api-keys/{{apikey_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "api-keys", "{{apikey_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "Regenerate (rotate) key",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/api-keys/{{apikey_id}}/regenerate/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "api-keys", "{{apikey_id}}", "regenerate", ""]
+            }
+          }
+        },
+        {
+          "name": "Revoke key",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/api-keys/{{apikey_id}}/revoke/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "api-keys", "{{apikey_id}}", "revoke", ""]
+            }
+          }
+        },
+        {
+          "name": "Activate key",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/api-keys/{{apikey_id}}/activate/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "api-keys", "{{apikey_id}}", "activate", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat",
+      "description": "Multi-tenant chat + feedback. Authenticate with API key or JWT; answers are scoped to that tenant's knowledge and chatbot config.",
+      "item": [
+        {
+          "name": "Chat (ask a question)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-API-Key", "value": "{{api_key}}", "description": "Alternative to Bearer JWT", "disabled": true }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"What are your business hours?\",\n  \"history\": [\n    { \"role\": \"user\", \"content\": \"Hello\" },\n    { \"role\": \"assistant\", \"content\": \"Hi! How can I help?\" }\n  ],\n  \"language\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "chat", ""]
+            },
+            "description": "`history` is optional (max CHAT_MAX_HISTORY_TURNS exchanges). `language` optional; blank = auto-detect."
+          }
+        },
+        {
+          "name": "Chat feedback",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"What are your business hours?\",\n  \"answer\": \"We are open 9am-5pm.\",\n  \"source\": \"rag\",\n  \"source_id\": \"\",\n  \"rating\": \"up\",\n  \"comment\": \"Helpful answer\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/feedback/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "chat", "feedback", ""]
+            },
+            "description": "Record feedback on a chat answer. `source` is `rag`; `rating` is `up` or `down`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chatbot Config",
+      "item": [
+        {
+          "name": "Get chatbot config",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/chatbot-config/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "chatbot-config", ""]
+            },
+            "description": "Get the authenticated tenant's chatbot configuration (auto-created on first access)."
+          }
+        },
+        {
+          "name": "Update chatbot config",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assistant_name\": \"Aida\",\n  \"company_name\": \"Acme Inc.\",\n  \"default_language\": \"en\",\n  \"tone\": \"friendly\",\n  \"strict_grounding\": true,\n  \"no_answer_message\": \"Sorry, I don't have that information.\",\n  \"top_k\": 5,\n  \"similarity_threshold\": 0.75\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/chatbot-config/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "chatbot-config", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Documents",
+      "description": "Upload and manage knowledge documents (scoped to the authenticated tenant).",
+      "item": [
+        {
+          "name": "List documents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/documents/?search=&ordering=-created_at",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "documents", ""],
+              "query": [
+                { "key": "search", "value": "", "description": "Search by filename" },
+                { "key": "ordering", "value": "-created_at", "description": "created_at | updated_at | file_size" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Upload document (multipart)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": [] },
+                { "key": "is_active", "value": "true", "type": "text" }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/documents/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "documents", ""]
+            },
+            "description": "Upload a file; it is chunked and embedded on ingestion. Select a file for the `file` field."
+          }
+        },
+        {
+          "name": "Retrieve document",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/documents/{{document_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "documents", "{{document_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "Update document",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "is_active", "value": "false", "type": "text" }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/documents/{{document_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "documents", "{{document_id}}", ""]
+            },
+            "description": "Writable fields: file, is_active."
+          }
+        },
+        {
+          "name": "Delete document",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/documents/{{document_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "documents", "{{document_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "Reindex document",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/documents/{{document_id}}/reindex/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "documents", "{{document_id}}", "reindex", ""]
+            },
+            "description": "Force re-chunking and re-embedding of an existing document."
+          }
+        },
+        {
+          "name": "Upload Word (.docx)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": [] }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/documents/upload-word/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "documents", "upload-word", ""]
+            },
+            "description": "Upload a Word (.docx) file; parsed, chunked and embedded immediately."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sync API Content",
+      "item": [
+        {
+          "name": "Sync content from external API",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"api_url\": \"https://example.com/api/articles/\",\n  \"document_name\": \"API Content\",\n  \"items_key\": \"results\",\n  \"full_refresh\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/sync-api-content/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "sync-api-content", ""]
+            },
+            "description": "Fetch items from an external public API and ingest them into the RAG system. Only `api_url` is required. `document_name` default 'API Content', `items_key` default 'results'."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Analytics",
+      "item": [
+        {
+          "name": "Usage analytics (self)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/analytics/usage/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "analytics", "usage", ""]
+            },
+            "description": "The authenticated tenant's usage rollup + live quota consumption."
+          }
+        },
+        {
+          "name": "Usage analytics (all tenants - admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/analytics/usage/?scope=all",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "analytics", "usage", ""],
+              "query": [{ "key": "scope", "value": "all", "description": "Admin only: per-tenant summary across all tenants" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Unanswered Questions",
+      "description": "Knowledge gaps captured when the bot answered with low confidence (AI-filtered + de-duplicated). Scoped to the authenticated tenant; no create endpoint (rows come from the chat pipeline).",
+      "item": [
+        {
+          "name": "List unanswered (by frequency)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/unanswered/?status=new&ordering=-occurrences",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "unanswered", ""],
+              "query": [
+                { "key": "status", "value": "new", "description": "new | reviewed | answered | dismissed" },
+                { "key": "language", "value": "", "disabled": true },
+                { "key": "search", "value": "", "description": "Search question text", "disabled": true },
+                { "key": "ordering", "value": "-occurrences", "description": "occurrences | last_asked_at | created_at" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Retrieve unanswered",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/unanswered/{{unanswered_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "unanswered", "{{unanswered_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "Update status (re-triage)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"reviewed\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/unanswered/{{unanswered_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "unanswered", "{{unanswered_id}}", ""]
+            },
+            "description": "Only `status` is writable (new | reviewed | answered | dismissed)."
+          }
+        },
+        {
+          "name": "Resolve (answer into knowledge)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answer\": \"Yes, we offer refunds within 14 days of purchase.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/unanswered/{{unanswered_id}}/resolve/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "unanswered", "{{unanswered_id}}", "resolve", ""]
+            },
+            "description": "With an `answer`, it is embedded into the tenant's knowledge (retrievable by the bot next time) and the gap is marked answered. Send an empty body to just mark it answered without adding knowledge."
+          }
+        },
+        {
+          "name": "Dismiss",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/unanswered/{{unanswered_id}}/dismiss/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "unanswered", "{{unanswered_id}}", "dismiss", ""]
+            }
+          }
+        },
+        {
+          "name": "Delete unanswered",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/unanswered/{{unanswered_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "unanswered", "{{unanswered_id}}", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Plans",
+      "description": "Browse plans (any authenticated user); create/update/delete are admin-only.",
+      "item": [
+        {
+          "name": "List plans",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/plans/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "plans", ""]
+            }
+          }
+        },
+        {
+          "name": "Create plan (admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Pro\",\n  \"slug\": \"pro\",\n  \"description\": \"Professional tier\",\n  \"price_usd\": \"49.00\",\n  \"monthly_questions\": 5000,\n  \"monthly_token_cap\": 1000000,\n  \"max_documents\": 100,\n  \"max_total_mb\": 500,\n  \"max_requests_per_min\": 60,\n  \"llm_model\": \"claude-haiku-4-5-20251001\",\n  \"is_active\": true,\n  \"sort_order\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/plans/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "plans", ""]
+            },
+            "description": "`slug` optional (auto-derived from name)."
+          }
+        },
+        {
+          "name": "Retrieve plan",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/plans/{{plan_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "plans", "{{plan_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "Update plan (admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price_usd\": \"59.00\",\n  \"is_active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/plans/{{plan_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "plans", "{{plan_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "Delete plan (admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/plans/{{plan_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "plans", "{{plan_id}}", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Subscriptions (admin)",
+      "item": [
+        {
+          "name": "List subscriptions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/subscriptions/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "subscriptions", ""]
+            }
+          }
+        },
+        {
+          "name": "Assign subscription",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user\": {{user_id}},\n  \"plan\": {{plan_id}},\n  \"duration_days\": 30,\n  \"auto_renew\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/subscriptions/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "subscriptions", ""]
+            },
+            "description": "Assign (or move) a user to a plan for a billing period."
+          }
+        },
+        {
+          "name": "Retrieve subscription",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/subscriptions/{{subscription_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "subscriptions", "{{subscription_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "Delete subscription",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/subscriptions/{{subscription_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "subscriptions", "{{subscription_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "My subscription",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/my-subscription/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "my-subscription", ""]
+            },
+            "description": "The caller's own subscription + live usage for the current period (any authenticated user)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "WhatsApp",
+      "description": "WhatsApp integration. The webhook is public (Meta Cloud API); everything else requires auth. Accounts are admin-only.",
+      "item": [
+        {
+          "name": "Webhook verify (GET)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/whatsapp/webhook/?hub.mode=subscribe&hub.verify_token=YOUR_VERIFY_TOKEN&hub.challenge=CHALLENGE_STRING",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "whatsapp", "webhook", ""],
+              "query": [
+                { "key": "hub.mode", "value": "subscribe" },
+                { "key": "hub.verify_token", "value": "YOUR_VERIFY_TOKEN" },
+                { "key": "hub.challenge", "value": "CHALLENGE_STRING" }
+              ]
+            },
+            "description": "Meta webhook verification handshake. Returns the challenge string when the verify token matches."
+          }
+        },
+        {
+          "name": "Webhook event (POST)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"object\": \"whatsapp_business_account\",\n  \"entry\": [\n    {\n      \"id\": \"WABA_ID\",\n      \"changes\": [\n        {\n          \"field\": \"messages\",\n          \"value\": {\n            \"messaging_product\": \"whatsapp\",\n            \"metadata\": { \"display_phone_number\": \"15551234567\", \"phone_number_id\": \"PHONE_NUMBER_ID\" },\n            \"contacts\": [{ \"profile\": { \"name\": \"John\" }, \"wa_id\": \"15557654321\" }],\n            \"messages\": [\n              {\n                \"from\": \"15557654321\",\n                \"id\": \"wamid.XXX\",\n                \"timestamp\": \"1700000000\",\n                \"type\": \"text\",\n                \"text\": { \"body\": \"Hello\" }\n              }\n            ]\n          }\n        }\n      ]\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/whatsapp/webhook/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "whatsapp", "webhook", ""]
+            },
+            "description": "Incoming message / status update from the Meta WhatsApp Cloud API (public endpoint)."
+          }
+        },
+        {
+          "name": "Send message",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"to_number\": \"15557654321\",\n  \"message\": \"Hello from the ChatBot API!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/whatsapp/send/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "whatsapp", "send", ""]
+            },
+            "description": "Send a free-form text message to a WhatsApp user."
+          }
+        },
+        {
+          "name": "Accounts",
+          "item": [
+            {
+              "name": "List accounts (admin)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/whatsapp/accounts/?search=&ordering=-created_at",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "whatsapp", "accounts", ""],
+                  "query": [
+                    { "key": "search", "value": "", "description": "phone_number_id / display_name / tenant__username" },
+                    { "key": "ordering", "value": "-created_at", "description": "created_at | display_name" },
+                    { "key": "is_active", "value": "", "disabled": true },
+                    { "key": "tenant", "value": "", "disabled": true }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Create account (admin)",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tenant\": {{user_id}},\n  \"phone_number_id\": \"PHONE_NUMBER_ID\",\n  \"access_token\": \"EAAG...meta-send-token\",\n  \"display_name\": \"Acme Support\",\n  \"is_active\": true\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/whatsapp/accounts/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "whatsapp", "accounts", ""]
+                },
+                "description": "Link a tenant to a WhatsApp Business number. `access_token` is write-only."
+              }
+            },
+            {
+              "name": "Retrieve account (admin)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/whatsapp/accounts/{{whatsapp_account_id}}/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "whatsapp", "accounts", "{{whatsapp_account_id}}", ""]
+                }
+              }
+            },
+            {
+              "name": "Update account (admin)",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"display_name\": \"Acme Support Updated\",\n  \"is_active\": true\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/whatsapp/accounts/{{whatsapp_account_id}}/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "whatsapp", "accounts", "{{whatsapp_account_id}}", ""]
+                }
+              }
+            },
+            {
+              "name": "Delete account (admin)",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/whatsapp/accounts/{{whatsapp_account_id}}/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "whatsapp", "accounts", "{{whatsapp_account_id}}", ""]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Users (read-only)",
+          "item": [
+            {
+              "name": "List WhatsApp users",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/whatsapp/users/?search=&ordering=-last_message_at",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "whatsapp", "users", ""],
+                  "query": [
+                    { "key": "search", "value": "", "description": "phone_number / profile_name" },
+                    { "key": "ordering", "value": "-last_message_at", "description": "created_at | last_message_at | message_count" },
+                    { "key": "is_active", "value": "", "disabled": true },
+                    { "key": "language_preference", "value": "", "disabled": true }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Retrieve WhatsApp user",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/whatsapp/users/{{whatsapp_user_id}}/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "whatsapp", "users", "{{whatsapp_user_id}}", ""]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sessions (read-only)",
+          "item": [
+            {
+              "name": "List sessions",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/whatsapp/sessions/?ordering=-updated_at",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "whatsapp", "sessions", ""],
+                  "query": [
+                    { "key": "ordering", "value": "-updated_at", "description": "created_at | updated_at" },
+                    { "key": "session_type", "value": "", "disabled": true },
+                    { "key": "is_active", "value": "", "disabled": true },
+                    { "key": "user", "value": "", "disabled": true }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Retrieve session",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/whatsapp/sessions/{{whatsapp_session_id}}/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "whatsapp", "sessions", "{{whatsapp_session_id}}", ""]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Messages (read-only)",
+          "item": [
+            {
+              "name": "List messages",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/whatsapp/messages/?search=&ordering=-created_at",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "whatsapp", "messages", ""],
+                  "query": [
+                    { "key": "search", "value": "", "description": "Search message_text" },
+                    { "key": "ordering", "value": "-created_at", "description": "created_at" },
+                    { "key": "message_type", "value": "", "disabled": true },
+                    { "key": "status", "value": "", "disabled": true },
+                    { "key": "user", "value": "", "disabled": true },
+                    { "key": "session", "value": "", "disabled": true }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Retrieve message",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/whatsapp/messages/{{whatsapp_message_id}}/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "whatsapp", "messages", "{{whatsapp_message_id}}", ""]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Analytics (read-only)",
+          "item": [
+            {
+              "name": "List analytics",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/whatsapp/analytics/?ordering=-date",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "whatsapp", "analytics", ""],
+                  "query": [
+                    { "key": "ordering", "value": "-date", "description": "date" },
+                    { "key": "date", "value": "", "disabled": true }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Retrieve analytics",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/whatsapp/analytics/{{whatsapp_analytics_id}}/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "whatsapp", "analytics", "{{whatsapp_analytics_id}}", ""]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "System & Docs",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health/",
+              "host": ["{{base_url}}"],
+              "path": ["health", ""]
+            }
+          }
+        },
+        {
+          "name": "OpenAPI schema",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/schema/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "schema", ""]
+            }
+          }
+        },
+        {
+          "name": "Swagger UI",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/docs/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "docs", ""]
+            }
+          }
+        },
+        {
+          "name": "ReDoc",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/redoc/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "redoc", ""]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
