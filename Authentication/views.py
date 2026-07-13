@@ -23,7 +23,16 @@ from .serializers import (
     UserSerializer,
     VerifyEmailSerializer,
 )
-from .services import EmailChangeError, confirm_email_change, start_email_change
+from rest_framework.views import APIView
+
+from .services import (
+    ActivationError,
+    EmailChangeError,
+    activate_user_by_token,
+    confirm_email_change,
+    send_activation_email,
+    start_email_change,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,17 +108,20 @@ class UserViewSet(viewsets.ModelViewSet):
         user = serializer.save()
         api_key, _ = APIKey.objects.get_or_create(user=user)
 
-        # Require email verification: send a 6-digit code to the new user's email.
-        # Non-blocking — the account works, but email_verified stays False until
-        # they confirm it via POST /users/verify-email/. Creation still succeeds
-        # even if the email can't be sent (the code can be re-requested).
+        # Block the account until the email is verified: create it INACTIVE and
+        # email an activation link. The user can't log in (JWT and API-key auth
+        # both reject inactive users) until they open the link, which flips
+        # is_active + email_verified via the public /auth/verify-email/ endpoint.
+        # A user with no email is left active (there's nothing to verify).
         email_verification = "not_sent"
         if user.email:
+            user.is_active = False
+            user.save(update_fields=["is_active"])
             try:
-                start_email_change(user, user.email)
-                email_verification = "code_sent"
+                send_activation_email(user)
+                email_verification = "activation_sent"
             except Exception:
-                logger.exception("Verification email failed for new user %s", user.pk)
+                logger.exception("Activation email failed for new user %s", user.pk)
                 email_verification = "send_failed"
 
         data = {
@@ -251,6 +263,35 @@ class UserViewSet(viewsets.ModelViewSet):
         return Response({"detail": "Password updated successfully."})
 
     @extend_schema(
+        responses={200: None},
+        description="Admin only: re-send the account-activation email to an inactive user.",
+    )
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[permissions.IsAdminUser],
+        url_path="resend-activation",
+    )
+    def resend_activation(self, request, pk=None):
+        user = self.get_object()
+        if user.is_active and user.email_verified:
+            return Response({"detail": "This account is already verified."})
+        if not user.email:
+            return Response(
+                {"detail": "User has no email to send an activation link to."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            send_activation_email(user)
+        except Exception:
+            logger.exception("Resend activation failed for %s", user.pk)
+            return Response(
+                {"detail": "Could not send the activation email. Try again later."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response({"detail": f"Activation email re-sent to {user.email}."})
+
+    @extend_schema(
         request=AdminSetPasswordSerializer,
         responses={200: None},
         description="Admin only: set another user's password (no old password needed).",
@@ -352,3 +393,47 @@ class APIKeyViewSet(viewsets.ModelViewSet):
         api_key.is_active = True
         api_key.save(update_fields=["is_active", "updated_at"])
         return Response(APIKeyAdminSerializer(api_key).data)
+
+
+class EmailVerifyView(APIView):
+    """Public: activate a newly created account from its email-verification link.
+
+    The link points at the frontend, which reads ``uid`` + ``token`` from the
+    query string and POSTs them here (GET is also accepted for a direct click).
+    No auth — the account is inactive and cannot log in until this succeeds.
+    """
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes: list = []
+
+    @extend_schema(
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {"uid": {"type": "string"}, "token": {"type": "string"}},
+                "required": ["uid", "token"],
+            }
+        },
+        responses={200: None, 400: None},
+    )
+    def post(self, request):
+        return self._verify(request.data.get("uid"), request.data.get("token"))
+
+    def get(self, request):
+        return self._verify(
+            request.query_params.get("uid"), request.query_params.get("token")
+        )
+
+    def _verify(self, uid, token):
+        if not uid or not token:
+            return Response(
+                {"detail": "uid and token are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            activate_user_by_token(uid, token)
+        except ActivationError as exc:
+            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"detail": "Email verified. Your account is now active.", "is_active": True}
+        )

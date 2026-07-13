@@ -9,8 +9,11 @@ from django.conf import settings
 from django.core.mail import send_mail
 from django.db import transaction
 from django.utils import timezone
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 
 from .models import EmailChangeRequest, User
+from .tokens import email_verification_token
 
 
 class EmailChangeError(Exception):
@@ -19,6 +22,65 @@ class EmailChangeError(Exception):
     def __init__(self, message: str):
         self.message = message
         super().__init__(message)
+
+
+class ActivationError(Exception):
+    """Raised when an account-activation link is invalid or expired."""
+
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(message)
+
+
+def build_activation_link(user: User) -> str:
+    """A frontend URL carrying the uid + token for this user's activation."""
+    uid = urlsafe_base64_encode(force_bytes(str(user.pk)))
+    token = email_verification_token.make_token(user)
+    base = (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
+    return f"{base}/verify-email?uid={uid}&token={token}"
+
+
+def send_activation_email(user: User) -> str:
+    """Email the account-activation link to the (as-yet inactive) user."""
+    link = build_activation_link(user)
+    send_mail(
+        subject="Verify your email to activate your account",
+        message=(
+            f"Hi {user.first_name or user.username},\n\n"
+            f"Your account has been created but is not active yet. Verify your "
+            f"email by opening this link:\n\n{link}\n\n"
+            f"If you didn't expect this, you can ignore this email."
+        ),
+        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+        recipient_list=[user.email],
+        fail_silently=False,
+    )
+    return link
+
+
+def activate_user_by_token(uidb64: str, token: str) -> User:
+    """Validate an activation link and flip the account to active + verified.
+
+    Idempotent: a link for an already-active, verified account returns the user
+    without error. Raises ``ActivationError`` for a bad/expired/used link.
+    """
+    try:
+        uid = force_str(urlsafe_base64_decode(uidb64))
+        user = User.objects.get(pk=uid)
+    except (User.DoesNotExist, ValueError, TypeError, OverflowError):
+        raise ActivationError("Invalid or expired verification link.")
+
+    # Already verified → treat a repeat click as success (token no longer valid).
+    if user.is_active and user.email_verified:
+        return user
+
+    if not email_verification_token.check_token(user, token):
+        raise ActivationError("Invalid or expired verification link.")
+
+    user.is_active = True
+    user.email_verified = True
+    user.save(update_fields=["is_active", "email_verified"])
+    return user
 
 
 def start_email_change(user: User, new_email: str) -> EmailChangeRequest:

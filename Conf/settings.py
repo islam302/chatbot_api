@@ -340,6 +340,9 @@ if EMAIL_HOST:
 else:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "ChatBot <no-reply@chatbot.local>")
+# Where the email-verification link points. The frontend page reads uid+token
+# from the query string and POSTs them to /auth/verify-email/ to activate.
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 # How long an email-verification code stays valid, and how many wrong tries
 # before it's locked.
 EMAIL_VERIFICATION_TTL_MINUTES = int(os.getenv("EMAIL_VERIFICATION_TTL_MINUTES", "15"))

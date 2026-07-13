@@ -70,6 +70,28 @@ headers: { "x-api-key": "427a48c9...." }
 > all data (documents, chat answers) is automatically scoped to them. You never
 > pass a user/tenant id in the body.
 
+### New accounts must verify their email before they can log in
+
+A newly created account is **inactive** until its email is verified — login
+returns `401` and the API key won't authenticate. The user gets an email with a
+link to `FRONTEND_URL/verify-email?uid=...&token=...`. Your frontend page reads
+`uid` and `token` from the query string and POSTs them to activate (public, no
+auth):
+
+```js
+await fetch(`${BASE}/auth/verify-email/`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ uid, token }),
+});
+// 200 -> account is active + email_verified; the user can now log in.
+// 400 -> invalid/expired link (ask an admin to re-send).
+```
+
+A direct `GET /auth/verify-email/?uid=...&token=...` also works (for clicking the
+link without a dedicated page). Links are **single-use** and expire (~3 days); an
+admin can re-send via `POST /users/{id}/resend-activation/`.
+
 ---
 
 ## 3. Chat (the main endpoint)
@@ -314,10 +336,10 @@ page from these.
 ### Get my profile — `GET /users/me/`
 Returns the current user: `{ id, username, email, email_verified, first_name, last_name, role, api_key, is_active, date_joined }`.
 
-> `email_verified` is `false` until the user confirms their email (see the
-> verified email change below — the same `verify-email` step also verifies the
-> email set at signup). Show a "verify your email" banner while it's `false`;
-> to (re)send a code for the *current* address, call `change-email` with it.
+> `email_verified` is `false` until the user confirms their email. New accounts
+> verify at signup via the activation link (§2, which also flips `is_active` to
+> `true`); a logged-in user changing their email verifies the new address via the
+> flow below. Show a "verify your email" banner while it's `false`.
 
 ### Edit name / username — `PATCH /users/me/`
 ```json
@@ -399,11 +421,14 @@ if (!res.ok) {
 ## 11. Admin endpoints (only if you build an admin panel)
 
 Require an **admin** token. Highlights:
-- `POST /users/` — create a tenant (returns the new user + `api_key`). If an
-  email is given, a 6-digit code is emailed to it and the account starts
-  `email_verified: false`; the response includes `email_verification`
-  (`code_sent` | `not_sent` | `send_failed`). The new user confirms it via
-  `POST /users/verify-email/` (§9).
+- `POST /users/` — create a tenant (returns the new user + `api_key`). **Email
+  verification is required:** with an email, the account is created **inactive**
+  (`is_active: false`, cannot log in) and an activation link is emailed; the
+  response includes `email_verification` (`activation_sent` | `send_failed` |
+  `not_sent`). The user activates via the public link (§2). A no-email account
+  stays active.
+- `POST /users/{id}/resend-activation/` — re-send the activation link to an
+  inactive user (first email failed, or the link expired).
 - `GET /users/` — list tenants (each includes its `api_key`).
 - `POST /users/{id}/regenerate-api-key/` — rotate a user's key (admin only; users can't rotate their own).
 - `POST /users/{id}/set-password/` — admin resets a user's password.

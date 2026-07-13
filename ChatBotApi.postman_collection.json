@@ -99,6 +99,24 @@
             },
             "description": "Verify that a JWT is valid (returns 200 with empty body if valid)."
           }
+        },
+        {
+          "name": "Verify email / activate account (public)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"uid\": \"<uid-from-link>\",\n  \"token\": \"<token-from-link>\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/verify-email/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "verify-email", ""]
+            },
+            "description": "Public (no auth). Activates a newly created inactive account. The activation email links to FRONTEND_URL/verify-email?uid=...&token=...; the frontend reads uid+token and posts them here. On success the account becomes active + email_verified. GET with ?uid=&token= also works for a direct link click."
+          }
         }
       ]
     },
@@ -136,7 +154,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "users", ""]
             },
-            "description": "Admin only. Creates a user, issues an API key, and optionally assigns a plan (`plan` = slug or id, `plan_duration_days` default 30). `plan` fields are optional. If an email is given, a 6-digit verification code is emailed to it and the account starts with `email_verified: false`; the response includes `email_verification` (code_sent | not_sent | send_failed). The new user confirms via POST /users/verify-email/."
+            "description": "Admin only. Creates a user, issues an API key, and optionally assigns a plan (`plan` = slug or id, `plan_duration_days` default 30). `plan` fields are optional. EMAIL VERIFICATION IS REQUIRED: if an email is given, the account is created INACTIVE (`is_active: false`, cannot log in) and an activation link is emailed to it; response includes `email_verification` (activation_sent | send_failed | not_sent). The user activates by opening the link, which hits the public POST /auth/verify-email/ (uid + token). A user created with no email stays active."
           }
         },
         {
@@ -290,6 +308,19 @@
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "users", "change-password", ""]
             }
+          }
+        },
+        {
+          "name": "Resend activation email (admin)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/{{user_id}}/resend-activation/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "{{user_id}}", "resend-activation", ""]
+            },
+            "description": "Admin only. Re-send the account-activation link to an inactive/unverified user (e.g. the first email failed or the link expired)."
           }
         },
         {

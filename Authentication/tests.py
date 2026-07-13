@@ -9,9 +9,12 @@ from django.core import mail
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 from rest_framework.test import APITestCase
 
 from Authentication.models import EmailChangeRequest, User
+from Authentication.tokens import email_verification_token
 
 FIXED_CODE = "123456"
 _GEN = "Authentication.models.EmailChangeRequest.generate_code"
@@ -130,7 +133,7 @@ class EmailChangeTests(APITestCase):
 
 
 @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
-class CreateUserVerificationTests(APITestCase):
+class CreateUserBlockingVerificationTests(APITestCase):
     def setUp(self):
         self.admin = User.objects.create_user(
             username="admin", password="x", is_staff=True, is_superuser=True
@@ -149,36 +152,93 @@ class CreateUserVerificationTests(APITestCase):
         body.update(overrides)
         return self.client.post(reverse("user-list"), body, format="json")
 
-    @mock.patch(_GEN, return_value=FIXED_CODE)
-    def test_create_emails_code_and_marks_unverified(self, _):
+    def test_create_makes_account_inactive_and_emails_link(self):
         res = self._create()
         self.assertEqual(res.status_code, 201)
-        self.assertEqual(res.data["email_verification"], "code_sent")
+        self.assertEqual(res.data["email_verification"], "activation_sent")
+        self.assertFalse(res.data["is_active"])
         self.assertFalse(res.data["email_verified"])
-        # A code was emailed to the new user's address.
+        # An activation LINK (not a code) was emailed to the new address.
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, ["newbie@example.com"])
-        self.assertIn(FIXED_CODE, mail.outbox[0].body)
+        self.assertIn("/verify-email?uid=", mail.outbox[0].body)
         user = User.objects.get(username="newbie")
+        self.assertFalse(user.is_active)
         self.assertFalse(user.email_verified)
 
-    @mock.patch(_GEN, return_value=FIXED_CODE)
-    def test_new_user_can_verify_their_email(self, _):
+    def test_inactive_user_cannot_log_in(self):
         self._create()
-        newbie = User.objects.get(username="newbie")
-        # The new user logs in and confirms with the code from their inbox.
-        self.client.force_authenticate(user=newbie)
+        self.client.force_authenticate(user=None)
         res = self.client.post(
-            reverse("user-verify-email"), {"code": FIXED_CODE}, format="json"
+            reverse("token_obtain_pair"),
+            {"username": "newbie", "password": "Str0ng-Passw0rd!"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 401)
+
+    def test_public_link_activates_the_account(self):
+        self._create()
+        user = User.objects.get(username="newbie")
+        uid = urlsafe_base64_encode(force_bytes(str(user.pk)))
+        token = email_verification_token.make_token(user)
+        self.client.force_authenticate(user=None)
+        res = self.client.post(
+            reverse("verify-email-public"), {"uid": uid, "token": token}, format="json"
         )
         self.assertEqual(res.status_code, 200)
-        newbie.refresh_from_db()
-        self.assertTrue(newbie.email_verified)
+        user.refresh_from_db()
+        self.assertTrue(user.is_active)
+        self.assertTrue(user.email_verified)
+        # And now they can log in.
+        login = self.client.post(
+            reverse("token_obtain_pair"),
+            {"username": "newbie", "password": "Str0ng-Passw0rd!"},
+            format="json",
+        )
+        self.assertEqual(login.status_code, 200)
 
-    def test_create_without_email_sends_nothing(self):
+    def test_bad_token_rejected(self):
+        self._create()
+        user = User.objects.get(username="newbie")
+        uid = urlsafe_base64_encode(force_bytes(str(user.pk)))
+        self.client.force_authenticate(user=None)
+        res = self.client.post(
+            reverse("verify-email-public"), {"uid": uid, "token": "bad-token"}, format="json"
+        )
+        self.assertEqual(res.status_code, 400)
+        user.refresh_from_db()
+        self.assertFalse(user.is_active)
+
+    def test_link_is_single_use(self):
+        self._create()
+        user = User.objects.get(username="newbie")
+        uid = urlsafe_base64_encode(force_bytes(str(user.pk)))
+        token = email_verification_token.make_token(user)
+        self.client.force_authenticate(user=None)
+        first = self.client.post(
+            reverse("verify-email-public"), {"uid": uid, "token": token}, format="json"
+        )
+        self.assertEqual(first.status_code, 200)
+        # Re-using the SAME token after activation: idempotent success, still active.
+        again = self.client.post(
+            reverse("verify-email-public"), {"uid": uid, "token": token}, format="json"
+        )
+        self.assertEqual(again.status_code, 200)
+        user.refresh_from_db()
+        self.assertTrue(user.is_active)
+
+    def test_resend_activation(self):
+        self._create()
+        user = User.objects.get(username="newbie")
+        res = self.client.post(reverse("user-resend-activation", args=[user.pk]))
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(mail.outbox), 2)  # original + resend
+
+    def test_create_without_email_stays_active(self):
         res = self._create(email="")
         self.assertEqual(res.status_code, 201)
         self.assertEqual(res.data["email_verification"], "not_sent")
+        self.assertTrue(res.data["is_active"])
         self.assertEqual(len(mail.outbox), 0)
 
 
