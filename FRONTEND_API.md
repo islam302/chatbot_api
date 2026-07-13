@@ -136,7 +136,7 @@ async function ask(question, history) {
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
     body: JSON.stringify({ question, history: history.slice(-20) }),
   });
-  if (!res.ok) throw await res.json();   // see §9 for error shapes
+  if (!res.ok) throw await res.json();   // see §10 for error shapes
   return res.json();
 }
 ```
@@ -198,7 +198,7 @@ show `error_message`). Then `chunk_count` is the number of searchable pieces.
 ### Re-index — `POST /documents/{id}/reindex/`  → `202` (re-embeds the document)
 
 > Limits per tenant: **100 documents / 200 MB / 20 MB per file** by default.
-> Over the limit returns **413** (see §9).
+> Over the limit returns **413** (see §10).
 
 ---
 
@@ -297,7 +297,7 @@ retrieves it the next time the question is asked; the gap is marked `answered`.
 ```
 Send an **empty body** to just mark it `answered` without adding knowledge.
 Returns the updated row. (May return `503` if embedding is temporarily
-unavailable — see §9.)
+unavailable — see §10.)
 
 ### Dismiss — `POST /unanswered/{id}/dismiss/`
 Marks the gap `dismissed` (not worth answering).
@@ -306,7 +306,70 @@ Marks the gap `dismissed` (not worth answering).
 
 ---
 
-## 9. Error handling
+## 9. Account settings (the logged-in user)
+
+Self-service account management for the authenticated user. Build a "Settings"
+page from these.
+
+### Get my profile — `GET /users/me/`
+Returns the current user: `{ id, username, email, email_verified, first_name, last_name, role, api_key, is_active, date_joined }`.
+
+> `email_verified` is `false` until the user confirms their email (see the
+> verified email change below — the same `verify-email` step also verifies the
+> email set at signup). Show a "verify your email" banner while it's `false`;
+> to (re)send a code for the *current* address, call `change-email` with it.
+
+### Edit name / username — `PATCH /users/me/`
+```json
+{ "first_name": "Alice", "last_name": "Smith", "username": "alice" }
+```
+Send any subset. Username must stay unique (400 if taken). **Email is not
+editable here** — it changes only through the verified flow below. The API key
+is never editable by the user. Returns the updated user, so refresh whatever
+copy of `me` you cache (name/username may have changed).
+
+### Change password — `POST /users/change-password/`
+```json
+{ "old_password": "...", "new_password": "...", "new_password_confirm": "..." }
+```
+Requires the current password. `200` on success; `400` if the old password is
+wrong or the new one fails validation.
+
+### Change email (verified, two steps)
+Email is never set directly — the user must prove they control the new address.
+
+**Step 1 — request a code:** `POST /users/change-email/`
+```json
+{ "new_email": "new@example.com" }
+```
+Sends a **6-digit code** to the new address (valid ~15 min). The account email
+is **not** changed yet. `400` if the address is already in use or is the current
+one. Calling this again (a "resend") sends a fresh code and **invalidates the
+previous one** — always verify with the latest code.
+
+**Step 2 — confirm:** `POST /users/verify-email/`
+```json
+{ "code": "123456" }
+```
+On success (`200`) the email is updated and the **updated user is returned**
+(refresh your cached `me`). `400` for a wrong/expired code, or after **5 wrong
+attempts** (the code locks — have the user request a new one via step 1).
+
+```js
+// Settings UI: email change flow
+await api("/users/change-email/", { method: "POST", body: { new_email } });
+// ...user reads the code from their inbox and types it...
+const updated = await api("/users/verify-email/", { method: "POST", body: { code } });
+// updated.email is now the new address — update your local user state.
+```
+
+### View my API key — `GET /users/api-key/`
+Read-only. Users **cannot** rotate their own key (only an admin can). Don't show
+a "regenerate" button in the user settings UI.
+
+---
+
+## 10. Error handling
 
 Errors return JSON `{ "detail": "..." }` (or field errors for 400 validation).
 
@@ -333,18 +396,22 @@ if (!res.ok) {
 
 ---
 
-## 10. Admin endpoints (only if you build an admin panel)
+## 11. Admin endpoints (only if you build an admin panel)
 
 Require an **admin** token. Highlights:
-- `POST /users/` — create a tenant (returns the new user + `api_key`).
+- `POST /users/` — create a tenant (returns the new user + `api_key`). If an
+  email is given, a 6-digit code is emailed to it and the account starts
+  `email_verified: false`; the response includes `email_verification`
+  (`code_sent` | `not_sent` | `send_failed`). The new user confirms it via
+  `POST /users/verify-email/` (§9).
 - `GET /users/` — list tenants (each includes its `api_key`).
-- `POST /users/regenerate-api-key/` — rotate the caller's key.
+- `POST /users/{id}/regenerate-api-key/` — rotate a user's key (admin only; users can't rotate their own).
 - `POST /users/{id}/set-password/` — admin resets a user's password.
 - `GET /api-keys/`, `POST /api-keys/{id}/revoke|activate|regenerate/` — key control.
 
 ---
 
-## 11. Minimal client wrapper (copy-paste starter)
+## 12. Minimal client wrapper (copy-paste starter)
 
 ```js
 const BASE = "https://una-ai-tools-apis.una-oic.org/chatbot-api/api/v1";

@@ -1,3 +1,5 @@
+import logging
+
 from django.contrib.auth import update_session_auth_hash
 from drf_spectacular.utils import extend_schema
 from rest_framework import filters, permissions, status, viewsets
@@ -13,17 +15,30 @@ from .serializers import (
     AdminSetPasswordSerializer,
     APIKeyAdminSerializer,
     APIKeySerializer,
+    ChangeEmailSerializer,
     ChangePasswordSerializer,
     CustomTokenObtainPairSerializer,
+    ProfileUpdateSerializer,
     UserRegistrationSerializer,
     UserSerializer,
+    VerifyEmailSerializer,
 )
+from .services import EmailChangeError, confirm_email_change, start_email_change
+
+logger = logging.getLogger(__name__)
 
 # Auth accepted on admin/account endpoints: API key, JWT, or session.
 ACCOUNT_AUTH = [APIKeyAuthentication, JWTAuthentication, SessionAuthentication]
 
-# UserViewSet actions a non-admin may call on their OWN account.
-SELF_SERVICE_ACTIONS = {"me", "change_password", "api_key", "regenerate_api_key"}
+# UserViewSet actions a non-admin may call on their OWN account. Note: users can
+# VIEW their API key (api_key) but never rotate it — key rotation is admin-only.
+SELF_SERVICE_ACTIONS = {
+    "me",
+    "change_password",
+    "change_email",
+    "verify_email",
+    "api_key",
+}
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -84,7 +99,24 @@ class UserViewSet(viewsets.ModelViewSet):
         user = serializer.save()
         api_key, _ = APIKey.objects.get_or_create(user=user)
 
-        data = {**UserSerializer(user).data, "api_key": api_key.key}
+        # Require email verification: send a 6-digit code to the new user's email.
+        # Non-blocking — the account works, but email_verified stays False until
+        # they confirm it via POST /users/verify-email/. Creation still succeeds
+        # even if the email can't be sent (the code can be re-requested).
+        email_verification = "not_sent"
+        if user.email:
+            try:
+                start_email_change(user, user.email)
+                email_verification = "code_sent"
+            except Exception:
+                logger.exception("Verification email failed for new user %s", user.pk)
+                email_verification = "send_failed"
+
+        data = {
+            **UserSerializer(user).data,
+            "api_key": api_key.key,
+            "email_verification": email_verification,
+        }
         if plan is not None:
             from subscriptions.services import assign_plan
 
@@ -128,9 +160,68 @@ class UserViewSet(viewsets.ModelViewSet):
         """Admin only: register (create) a new user and generate an API key."""
         return self.create(request)
 
-    @extend_schema(responses={200: UserSerializer})
-    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated])
+    @extend_schema(methods=["GET"], responses={200: UserSerializer})
+    @extend_schema(
+        methods=["PATCH"],
+        request=ProfileUpdateSerializer,
+        responses={200: UserSerializer},
+        description="Update your own profile: username, first name, last name. "
+        "Email changes go through change-email/verify-email; the API key is not editable.",
+    )
+    @action(
+        detail=False,
+        methods=["get", "patch"],
+        permission_classes=[permissions.IsAuthenticated],
+    )
     def me(self, request):
+        if request.method == "PATCH":
+            serializer = ProfileUpdateSerializer(
+                request.user, data=request.data, partial=True, context={"request": request}
+            )
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+        return Response(UserSerializer(request.user).data)
+
+    @extend_schema(
+        request=ChangeEmailSerializer,
+        responses={200: None},
+        description="Start a verified email change: emails a 6-digit code to the new address. "
+        "The email is only updated after confirming with verify-email.",
+    )
+    @action(
+        detail=False,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated],
+        url_path="change-email",
+    )
+    def change_email(self, request):
+        serializer = ChangeEmailSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        start_email_change(request.user, serializer.validated_data["new_email"])
+        return Response(
+            {"detail": "A verification code was sent to the new email address."}
+        )
+
+    @extend_schema(
+        request=VerifyEmailSerializer,
+        responses={200: UserSerializer},
+        description="Confirm a pending email change with the 6-digit code.",
+    )
+    @action(
+        detail=False,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated],
+        url_path="verify-email",
+    )
+    def verify_email(self, request):
+        serializer = VerifyEmailSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            confirm_email_change(request.user, serializer.validated_data["code"])
+        except EmailChangeError as exc:
+            return Response(
+                {"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST
+            )
         return Response(UserSerializer(request.user).data)
 
     @extend_schema(
@@ -186,22 +277,8 @@ class UserViewSet(viewsets.ModelViewSet):
         url_path="api-key",
     )
     def api_key(self, request):
-        """Get or create the current user's API key."""
+        """View the current user's API key (read-only — users cannot rotate it)."""
         api_key, _ = APIKey.objects.get_or_create(user=request.user)
-        return Response(APIKeySerializer(api_key).data)
-
-    @extend_schema(responses={200: APIKeySerializer})
-    @action(
-        detail=False,
-        methods=["post"],
-        permission_classes=[permissions.IsAuthenticated],
-        url_path="regenerate-api-key",
-    )
-    def regenerate_api_key(self, request):
-        """Generate a new API key for the current user."""
-        api_key, _ = APIKey.objects.get_or_create(user=request.user)
-        api_key.key = APIKey.generate_key()
-        api_key.save()
         return Response(APIKeySerializer(api_key).data)
 
     @extend_schema(responses={200: APIKeySerializer})

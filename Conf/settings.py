@@ -325,6 +325,26 @@ INGESTION_MODE = os.getenv("INGESTION_MODE", "sync").lower()
 # it off the chat request path in production; "sync" keeps tests deterministic.
 UNANSWERED_CAPTURE_MODE = os.getenv("UNANSWERED_CAPTURE_MODE", "sync").lower()
 
+# --- Email -------------------------------------------------------------------
+# Real SMTP is used as soon as EMAIL_HOST is set (host/user/password via env);
+# until then emails are printed to the server console so the flow is testable
+# with zero infrastructure.
+EMAIL_HOST = os.getenv("EMAIL_HOST", "")
+if EMAIL_HOST:
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+    EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+    EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+    EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "true").lower() in {"1", "true", "yes", "on"}
+    EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "false").lower() in {"1", "true", "yes", "on"}
+else:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "ChatBot <no-reply@chatbot.local>")
+# How long an email-verification code stays valid, and how many wrong tries
+# before it's locked.
+EMAIL_VERIFICATION_TTL_MINUTES = int(os.getenv("EMAIL_VERIFICATION_TTL_MINUTES", "15"))
+EMAIL_VERIFICATION_MAX_ATTEMPTS = int(os.getenv("EMAIL_VERIFICATION_MAX_ATTEMPTS", "5"))
+
 # --- Celery / Redis ---------------------------------------------------------
 # In Docker these point at the `redis` service; locally default to localhost.
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")

@@ -104,7 +104,7 @@
     },
     {
       "name": "Users",
-      "description": "User accounts. List/create/update/delete are admin-only; self-service actions (me, change-password, api-key, regenerate-api-key) need only authentication.",
+      "description": "User accounts. List/create/update/delete are admin-only. Self-service (any authenticated user, own account): me (GET/PATCH profile), change-email + verify-email (verified email change), change-password, and api-key (view only). Users cannot rotate their own API key — that is admin-only.",
       "item": [
         {
           "name": "List users (admin)",
@@ -136,7 +136,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "users", ""]
             },
-            "description": "Admin only. Creates a user, issues an API key, and optionally assigns a plan (`plan` = slug or id, `plan_duration_days` default 30). `plan` fields are optional."
+            "description": "Admin only. Creates a user, issues an API key, and optionally assigns a plan (`plan` = slug or id, `plan_duration_days` default 30). `plan` fields are optional. If an email is given, a 6-digit verification code is emailed to it and the account starts with `email_verified: false`; the response includes `email_verification` (code_sent | not_sent | send_failed). The new user confirms via POST /users/verify-email/."
           }
         },
         {
@@ -226,6 +226,57 @@
           }
         },
         {
+          "name": "Update my profile (name/username)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"Alice\",\n  \"last_name\": \"Smith\",\n  \"username\": \"alice\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/me/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "me", ""]
+            },
+            "description": "Edit your own first_name, last_name, and username. Email is NOT here (use change-email/verify-email); the API key is not editable."
+          }
+        },
+        {
+          "name": "Change email (request code)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"new_email\": \"new@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/change-email/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "change-email", ""]
+            },
+            "description": "Step 1 of verified email change. Emails a 6-digit code to the new address; the email is NOT changed until you confirm with verify-email."
+          }
+        },
+        {
+          "name": "Verify email (confirm code)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"123456\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/verify-email/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "verify-email", ""]
+            },
+            "description": "Step 2 of verified email change. Submit the 6-digit code from the email to apply the new address."
+          }
+        },
+        {
           "name": "Change my password",
           "request": {
             "method": "POST",
@@ -268,19 +319,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "users", "api-key", ""]
             },
-            "description": "Get or create the current user's API key."
-          }
-        },
-        {
-          "name": "Regenerate my API key",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/v1/users/regenerate-api-key/",
-              "host": ["{{base_url}}"],
-              "path": ["api", "v1", "users", "regenerate-api-key", ""]
-            }
+            "description": "View the current user's API key (read-only). Users cannot rotate it; only an admin can."
           }
         },
         {

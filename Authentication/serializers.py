@@ -27,6 +27,7 @@ class UserSerializer(serializers.ModelSerializer):
             "id",
             "username",
             "email",
+            "email_verified",
             "first_name",
             "last_name",
             "role",
@@ -34,7 +35,7 @@ class UserSerializer(serializers.ModelSerializer):
             "is_active",
             "date_joined",
         ]
-        read_only_fields = ["id", "role", "api_key", "date_joined"]
+        read_only_fields = ["id", "role", "api_key", "email_verified", "date_joined"]
 
     def get_role(self, obj):
         return "admin" if obj.is_staff else "user"
@@ -111,6 +112,51 @@ class APIKeyAdminSerializer(serializers.ModelSerializer):
         model = APIKey
         fields = ["id", "user", "username", "key", "is_active", "last_used_at", "created_at"]
         read_only_fields = ["id", "key", "username", "last_used_at", "created_at"]
+
+
+class ProfileUpdateSerializer(serializers.ModelSerializer):
+    """Self-service profile edit: name + username. Email is NOT here — it changes
+    only through the verified flow; the API key is never editable."""
+
+    class Meta:
+        model = User
+        fields = ["username", "first_name", "last_name"]
+
+    def validate_username(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Username cannot be blank.")
+        qs = User.objects.filter(username__iexact=value)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("That username is already taken.")
+        return value
+
+
+class ChangeEmailSerializer(serializers.Serializer):
+    """Step 1 of the verified email change — request a code for a new address."""
+
+    new_email = serializers.EmailField()
+
+    def validate_new_email(self, value):
+        value = value.strip().lower()
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user is not None and user.email and user.email.lower() == value:
+            raise serializers.ValidationError("That's already your current email.")
+        qs = User.objects.filter(email__iexact=value)
+        if user is not None:
+            qs = qs.exclude(pk=user.pk)
+        if qs.exists():
+            raise serializers.ValidationError("That email address is already in use.")
+        return value
+
+
+class VerifyEmailSerializer(serializers.Serializer):
+    """Step 2 of the verified email change — confirm with the emailed code."""
+
+    code = serializers.CharField(min_length=4, max_length=8)
 
 
 class ChangePasswordSerializer(serializers.Serializer):
