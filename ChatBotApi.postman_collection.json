@@ -193,7 +193,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "users", "create", ""]
             },
-            "description": "Admin only. Alias of create user."
+            "description": "Admin only. Alias of create user (same behavior, including the email verification code + email_verified: false)."
           }
         },
         {
@@ -210,7 +210,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "users", "register", ""]
             },
-            "description": "Admin only. Alias of create user."
+            "description": "Admin only. Alias of create user (same behavior, including the email verification code + email_verified: false)."
           }
         },
         {
