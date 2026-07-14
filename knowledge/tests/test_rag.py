@@ -67,34 +67,51 @@ class AnswerQuestionTests(TestCase):
         self.assertEqual(len(res.sources), 2)
         self.assertIn("filename", res.sources[0])
 
-    def test_grounded_no_tag_forces_not_confident_and_is_stripped(self):
-        # Strict hits (would be confident) but the model reports it couldn't
-        # ground the answer → not confident, and the tag never reaches the user.
-        llm = FakeLLM(text="I don't have that information.\n[[GROUNDED:no]]")
+    def test_status_gap_forces_not_confident_and_is_stripped(self):
+        # Strict hits (would be confident) but the model says it's an in-domain
+        # question with no answer in the data → gap: not confident, tag stripped.
+        llm = FakeLLM(text="I don't have that information.\n[[STATUS:gap]]")
         res = self._run(hits=[make_hit("on-topic chunk")], llm=llm)
         self.assertFalse(res.confident)
-        self.assertNotIn("GROUNDED", res.answer)
+        self.assertEqual(res.answer_status, "gap")
+        self.assertNotIn("STATUS", res.answer)
         self.assertEqual(res.answer, "I don't have that information.")
 
-    def test_grounded_yes_tag_kept_confident_and_stripped(self):
-        llm = FakeLLM(text="We sell software.\n[[GROUNDED:yes]]")
+    def test_status_answered_is_confident_and_stripped(self):
+        llm = FakeLLM(text="We sell software.\n[[STATUS:answered]]")
         res = self._run(hits=[make_hit("we sell software")], llm=llm)
         self.assertTrue(res.confident)
+        self.assertEqual(res.answer_status, "answered")
         self.assertEqual(res.answer, "We sell software.")
 
+    def test_status_answered_on_below_threshold_fallback_is_confident(self):
+        # A match below the strict threshold (fallback only), still answered from
+        # the data → confident, NOT logged as a gap.
+        llm = FakeLLM(text="Our CEO is X.\n[[STATUS:answered]]")
+        res = self._run(hits=[], fallback_hits=[make_hit("CEO is X")], llm=llm)
+        self.assertTrue(res.confident)
+        self.assertEqual(res.answer_status, "answered")
+
+    def test_status_offtopic_not_confident_not_a_gap(self):
+        llm = FakeLLM(text="Hello! How can I help?\n[[STATUS:offtopic]]")
+        res = self._run(hits=[make_hit("chunk")], llm=llm)
+        self.assertFalse(res.confident)
+        self.assertEqual(res.answer_status, "offtopic")
+
     def test_missing_tag_keeps_retrieval_confidence(self):
-        # No tag → behavior unchanged (confident from strict retrieval).
+        # No tag → behavior falls back to strict retrieval.
         res = self._run(hits=[make_hit("we sell software")])
         self.assertTrue(res.confident)
 
 
-class ExtractGroundingTests(TestCase):
+class ExtractStatusTests(TestCase):
     def test_parses_and_strips(self):
-        from knowledge.services.rag import _extract_grounding
+        from knowledge.services.rag import _extract_status
 
-        self.assertEqual(_extract_grounding("ans\n[[GROUNDED:no]]"), ("ans", False))
-        self.assertEqual(_extract_grounding("ans [[GROUNDED:yes]]"), ("ans", True))
-        self.assertEqual(_extract_grounding("plain answer"), ("plain answer", None))
+        self.assertEqual(_extract_status("ans\n[[STATUS:gap]]"), ("ans", "gap"))
+        self.assertEqual(_extract_status("ans [[STATUS:answered]]"), ("ans", "answered"))
+        self.assertEqual(_extract_status("hi [[STATUS:offtopic]]"), ("hi", "offtopic"))
+        self.assertEqual(_extract_status("plain answer"), ("plain answer", None))
 
 
 class IsolationGuardTests(TestCase):

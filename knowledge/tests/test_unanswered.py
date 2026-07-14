@@ -1,4 +1,4 @@
-"""Knowledge-gap capture: normalisation, AI filter, dedup, chat wiring, API."""
+"""Knowledge-gap capture: normalisation, dedup, chat wiring (gap-only), review API."""
 
 from __future__ import annotations
 
@@ -13,10 +13,8 @@ from knowledge.models import (
     UnansweredStatus,
     UploadedDocument,
 )
-from knowledge.services import unanswered
 from knowledge.services.unanswered import (
     QA_DOC_FILENAME,
-    GapVerdict,
     capture_unanswered,
     normalize_question,
     resolve_to_knowledge,
@@ -25,13 +23,12 @@ from knowledge.views import chat as chat_view
 
 from .factories import make_tenant
 
-# Patch targets for the AI filter so tests never call a real LLM.
-_CLASSIFY = "knowledge.services.unanswered.classify_gap"
 # Patch target for embeddings so resolve tests never call OpenAI.
 _EMBED = "knowledge.services.unanswered.embed_one"
 
 
 def _fake_answer(**kw):
+    """An AnswerResult. `answer_status` drives capture: only 'gap' is captured."""
     from knowledge.services.rag import AnswerResult
 
     base = dict(answer="sorry", source="rag", confident=False, model="gpt-4o")
@@ -59,34 +56,25 @@ class CaptureServiceTests(APITestCase):
     def setUp(self):
         self.user, _ = make_tenant("alice")
 
-    def test_kept_question_is_recorded(self):
-        with mock.patch(_CLASSIFY, return_value=GapVerdict(True, "real question")):
-            obj = capture_unanswered(
-                user=self.user, question="Do you offer refunds?", language="en"
-            )
+    def test_question_is_recorded(self):
+        obj = capture_unanswered(
+            user=self.user, question="Do you offer refunds?", language="en", reason="in-domain"
+        )
         self.assertIsNotNone(obj)
         self.assertEqual(obj.occurrences, 1)
         self.assertEqual(obj.status, UnansweredStatus.NEW)
-        self.assertEqual(obj.reason, "real question")
-
-    def test_rejected_question_is_dropped(self):
-        with mock.patch(_CLASSIFY, return_value=GapVerdict(False, "greeting")):
-            obj = capture_unanswered(user=self.user, question="hi there", language="en")
-        self.assertIsNone(obj)
-        self.assertEqual(UnansweredQuestion.objects.count(), 0)
+        self.assertEqual(obj.reason, "in-domain")
 
     def test_duplicate_bumps_occurrences_not_rows(self):
-        with mock.patch(_CLASSIFY, return_value=GapVerdict(True, "x")):
-            capture_unanswered(user=self.user, question="Do you ship to Egypt?")
-            capture_unanswered(user=self.user, question="do you ship to egypt")
+        capture_unanswered(user=self.user, question="Do you ship to Egypt?")
+        capture_unanswered(user=self.user, question="do you ship to egypt")
         self.assertEqual(UnansweredQuestion.objects.count(), 1)
         self.assertEqual(UnansweredQuestion.objects.get().occurrences, 2)
 
     def test_same_question_isolated_per_tenant(self):
         bob, _ = make_tenant("bob")
-        with mock.patch(_CLASSIFY, return_value=GapVerdict(True, "x")):
-            capture_unanswered(user=self.user, question="What is the price?")
-            capture_unanswered(user=bob, question="What is the price?")
+        capture_unanswered(user=self.user, question="What is the price?")
+        capture_unanswered(user=bob, question="What is the price?")
         self.assertEqual(UnansweredQuestion.objects.filter(user=self.user).count(), 1)
         self.assertEqual(UnansweredQuestion.objects.filter(user=bob).count(), 1)
 
@@ -98,8 +86,7 @@ class CaptureServiceTests(APITestCase):
 class ResolveToKnowledgeTests(APITestCase):
     def setUp(self):
         self.user, _ = make_tenant("alice")
-        with mock.patch(_CLASSIFY, return_value=GapVerdict(True, "x")):
-            self.obj = capture_unanswered(user=self.user, question="Do you ship to Egypt?")
+        self.obj = capture_unanswered(user=self.user, question="Do you ship to Egypt?")
 
     def test_creates_embedded_chunk_and_marks_answered(self):
         with mock.patch(_EMBED, return_value=([1.0, 0.0], "test-embed")):
@@ -124,92 +111,52 @@ class ResolveToKnowledgeTests(APITestCase):
             resolve_to_knowledge(unanswered=self.obj, answer="   ", user=self.user)
 
 
-class ClassifyGapTests(APITestCase):
-    def test_parses_yes(self):
-        backend = mock.Mock()
-        backend.complete.return_value = "YES: asks about a policy"
-        with mock.patch("knowledge.services.unanswered.get_backend", return_value=backend):
-            v = unanswered.classify_gap("what is your return policy?")
-        self.assertTrue(v.keep)
-        self.assertEqual(v.reason, "asks about a policy")
-
-    def test_parses_no(self):
-        backend = mock.Mock()
-        backend.complete.return_value = "NO: just a greeting"
-        with mock.patch("knowledge.services.unanswered.get_backend", return_value=backend):
-            v = unanswered.classify_gap("hello")
-        self.assertFalse(v.keep)
-
-    def test_fails_open_on_llm_error(self):
-        from knowledge.services.llm import LLMError
-
-        with mock.patch(
-            "knowledge.services.unanswered.get_backend", side_effect=LLMError("no key")
-        ):
-            v = unanswered.classify_gap("anything")
-        self.assertTrue(v.keep)  # never silently drop a real gap on outage
-
-    def test_history_is_passed_to_the_filter(self):
-        backend = mock.Mock()
-        backend.complete.return_value = "NO: context-dependent follow-up"
-        history = [
-            {"role": "user", "content": "do you sell IDM?"},
-            {"role": "assistant", "content": "Yes, we do."},
-        ]
-        with mock.patch("knowledge.services.unanswered.get_backend", return_value=backend):
-            unanswered.classify_gap("how much is it?", history=history)
-        # The recent conversation is included so the model can see the fragment's context.
-        sent_prompt = backend.complete.call_args.args[1]
-        self.assertIn("do you sell IDM?", sent_prompt)
-        self.assertIn("how much is it?", sent_prompt)
-
-
 class ChatWiringTests(APITestCase):
+    """Only an in-domain, unanswered turn (answer_status == 'gap') is captured."""
+
     def setUp(self):
         self.user, self.key = make_tenant("alice")
         self.url = reverse("chat")
 
     def _post(self, body):
-        return self.client.post(
-            self.url, body, format="json", HTTP_X_API_KEY=self.key
-        )
+        return self.client.post(self.url, body, format="json", HTTP_X_API_KEY=self.key)
 
-    def test_low_confidence_answer_triggers_capture(self):
-        history = [
-            {"role": "user", "content": "hi"},
-            {"role": "assistant", "content": "hello"},
-        ]
-        with mock.patch.object(
-            chat_view, "answer_question", return_value=_fake_answer(confident=False)
-        ), mock.patch.object(chat_view, "dispatch_capture") as cap:
-            res = self._post({"question": "obscure question", "history": history})
+    def test_gap_status_triggers_capture(self):
+        answer = _fake_answer(confident=False, answer_status="gap")
+        with mock.patch.object(chat_view, "answer_question", return_value=answer), \
+             mock.patch.object(chat_view, "dispatch_capture") as cap:
+            res = self._post({"question": "an in-domain question we can't answer"})
         self.assertEqual(res.status_code, 200)
         cap.assert_called_once()
-        self.assertEqual(cap.call_args.kwargs["question"], "obscure question")
-        # Conversation context is forwarded so the filter can drop follow-ups.
-        self.assertEqual(cap.call_args.kwargs["history"], history)
+        self.assertEqual(cap.call_args.kwargs["question"], "an in-domain question we can't answer")
 
-    def test_confident_answer_does_not_capture(self):
-        with mock.patch.object(
-            chat_view, "answer_question", return_value=_fake_answer(confident=True)
-        ), mock.patch.object(chat_view, "dispatch_capture") as cap:
+    def test_answered_does_not_capture(self):
+        answer = _fake_answer(confident=True, answer_status="answered")
+        with mock.patch.object(chat_view, "answer_question", return_value=answer), \
+             mock.patch.object(chat_view, "dispatch_capture") as cap:
             self._post({"question": "known question"})
+        cap.assert_not_called()
+
+    def test_offtopic_does_not_capture(self):
+        # Not confident, but off-topic (a greeting / unrelated) → NOT a gap.
+        answer = _fake_answer(confident=False, answer_status="offtopic")
+        with mock.patch.object(chat_view, "answer_question", return_value=answer), \
+             mock.patch.object(chat_view, "dispatch_capture") as cap:
+            self._post({"question": "hello there"})
         cap.assert_not_called()
 
 
 class ReviewApiTests(APITestCase):
     def setUp(self):
         self.user, self.key = make_tenant("alice")
-        with mock.patch(_CLASSIFY, return_value=GapVerdict(True, "x")):
-            self.obj = capture_unanswered(user=self.user, question="Do you offer refunds?")
+        self.obj = capture_unanswered(user=self.user, question="Do you offer refunds?")
 
     def _auth(self):
         self.client.credentials(HTTP_X_API_KEY=self.key)
 
     def test_list_scoped_to_tenant(self):
         bob, bob_key = make_tenant("bob")
-        with mock.patch(_CLASSIFY, return_value=GapVerdict(True, "x")):
-            capture_unanswered(user=bob, question="bob only question")
+        capture_unanswered(user=bob, question="bob only question")
         self._auth()
         res = self.client.get(reverse("unanswered-list"))
         self.assertEqual(res.status_code, 200)
@@ -234,7 +181,6 @@ class ReviewApiTests(APITestCase):
         self.assertEqual(res.status_code, 200)
         self.obj.refresh_from_db()
         self.assertEqual(self.obj.status, UnansweredStatus.ANSWERED)
-        # A retrievable Q&A chunk now exists under the tenant's Q&A document.
         doc = UploadedDocument.objects.get(uploaded_by=self.user, filename=QA_DOC_FILENAME)
         chunk = DocumentChunk.objects.get(document=doc)
         self.assertIn("Yes, refunds within 14 days.", chunk.content)

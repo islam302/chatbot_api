@@ -91,12 +91,11 @@ class ChatAPIView(APIView):
             chunk_count=len(result.sources),
         )
 
-        # The bot couldn't confidently answer → record it as a knowledge gap
-        # (AI-filtered + de-duplicated off the request path). Never blocks the reply.
-        if not result.confident:
-            dispatch_capture(
-                user=request.user, question=question, language=language, history=history
-            )
+        # Capture ONLY an in-domain question the bot couldn't answer from the data
+        # ("gap") — the model classified it, so greetings/off-topic are excluded.
+        # De-duplicated + off the request path; never blocks the reply.
+        if result.answer_status == "gap":
+            dispatch_capture(user=request.user, question=question, language=language)
 
         cost = quota.estimate_cost(
             result.model, result.prompt_tokens, result.completion_tokens

@@ -41,29 +41,35 @@ class AnswerResult:
     sources: list[dict] = field(default_factory=list)
     chunk_hits: list[ChunkHit] = field(default_factory=list)
     confident: bool = True
+    # How the model classified this turn (drives the "not sure" hint + gap capture):
+    #   "answered"  – the specific answer was in the tenant's data.
+    #   "gap"       – in-domain question, but the answer is NOT in the data → capture.
+    #   "offtopic"  – greeting / unrelated question → do not capture.
+    answer_status: str = "answered"
     # Token usage of the LLM call that produced this answer (for metering).
     model: str = ""
     prompt_tokens: int = 0
     completion_tokens: int = 0
 
 
-_GROUNDED_TAG = re.compile(r"\[\[\s*GROUNDED\s*:\s*(yes|no)\s*\]\]", re.IGNORECASE)
+_STATUS_TAG = re.compile(
+    r"\[\[\s*STATUS\s*:\s*(answered|gap|offtopic)\s*\]\]", re.IGNORECASE
+)
 
 
-def _extract_grounding(text: str) -> tuple[str, bool | None]:
-    """Split the model's control tag off the answer.
+def _extract_status(text: str) -> tuple[str, str | None]:
+    """Split the model's classification tag off the answer.
 
-    Returns ``(clean_answer, grounded)`` where ``grounded`` is True/False from the
-    ``[[GROUNDED:yes|no]]`` tag, or ``None`` if the model omitted it (then the
-    caller keeps its retrieval-based confidence). The tag is always stripped from
-    the visible answer.
+    Returns ``(clean_answer, status)`` where status is "answered" | "gap" |
+    "offtopic" from the ``[[STATUS:...]]`` tag, or ``None`` if the model omitted
+    it. The tag is always stripped from the visible answer.
     """
-    grounded: bool | None = None
-    match = _GROUNDED_TAG.search(text or "")
+    status: str | None = None
+    match = _STATUS_TAG.search(text or "")
     if match:
-        grounded = match.group(1).lower() == "yes"
-    clean = _GROUNDED_TAG.sub("", text or "").strip()
-    return clean, grounded
+        status = match.group(1).lower()
+    clean = _STATUS_TAG.sub("", text or "").strip()
+    return clean, status
 
 
 def detect_dialect(text: str, language: str = "ar") -> str:
@@ -154,7 +160,12 @@ def answer_question(
         # The tenant's knowledge base is empty → identity / greeting handoff
         # (the bot may still introduce itself; it never invents facts).
         if cfg.no_answer_message:
-            return AnswerResult(answer=cfg.no_answer_message, source="rag", confident=False)
+            return AnswerResult(
+                answer=cfg.no_answer_message,
+                source="rag",
+                confident=False,
+                answer_status="offtopic",
+            )
         try:
             llm = get_backend(llm_model)
             no_data_prompt = (
@@ -165,6 +176,7 @@ def answer_question(
                 answer=res.text,
                 source="rag",
                 confident=False,
+                answer_status="offtopic",
                 model=res.model,
                 prompt_tokens=res.prompt_tokens,
                 completion_tokens=res.completion_tokens,
@@ -175,31 +187,48 @@ def answer_question(
                 "Can I help you with something else?",
                 source="rag",
                 confident=False,
+                answer_status="offtopic",
             )
 
     knowledge = "\n\n---\n\n".join(hit.content for hit in chunks)
     history_text = _render_history(list(history or []))
 
     user_prompt = (
-        f"Conversation so far:\n{history_text or '(None)'}\n\n"
+        f"Conversation so far (context ONLY — to understand what the customer refers to, "
+        f"NOT a source of facts):\n{history_text or '(None)'}\n\n"
         f"What you know:\n{knowledge}\n\n"
         f"Customer's message: {question}\n\n"
         f"Reply naturally as part of the team, following your rules. Answer directly — do NOT "
         f"open with a greeting (مرحبا/أهلاً/hello) or re-introduce yourself unless the customer's "
         f"message above is itself a greeting.\n"
-        f"CRITICAL GROUNDING: \"What you know\" above is your ONLY source. You have NO outside "
-        f"or general knowledge. Every specific fact — names, titles, who-came-before, dates, "
-        f"numbers, prices — must be written EXPLICITLY in \"What you know\". If it isn't there, "
-        f"you do NOT know it: kindly say you don't have that information. Never guess, never "
-        f"infer, never use knowledge from outside this text, never give one person another "
+        f"CRITICAL GROUNDING: \"What you know\" above is your ONLY source of truth. You have NO "
+        f"outside or general knowledge — not about real people, organisations, or world facts, "
+        f"even ones you are sure about. Every specific fact — names, titles, who-came-before, "
+        f"dates, numbers, prices — must be written EXPLICITLY in \"What you know\". If it isn't "
+        f"there, you do NOT know it: kindly say you don't have that information. Never guess, "
+        f"never infer, never pull a fact from outside this text, never give one person another "
         f"person's title, and for 'who was before' order by the DATES in the text (not the "
         f"listing order) — if no earlier holder of that exact role is stated, say you don't "
-        f"have it. Do not mention these notes or say 'based on the information'.\n\n"
+        f"have it.\n"
+        f"ABOUT THE CONVERSATION: use it ONLY to resolve what the customer means (pronouns like "
+        f"'him', 'the current one', 'before that'). It is NOT evidence. If an earlier reply in "
+        f"the conversation stated something that is not in \"What you know\", it was a MISTAKE — "
+        f"do not repeat or confirm it; correct it and say you don't have that information. If a "
+        f"follow-up is ambiguous about which role or person it means, ask a short clarifying "
+        f"question instead of guessing. Do not mention these notes or say 'based on the "
+        f"information'.\n\n"
         f"{_language_directive(language)}\n\n"
-        f"SYSTEM (do not show the customer): after your full reply, on a new final line, output "
-        f"exactly one tag — [[GROUNDED:yes]] if every specific fact you stated came from \"What "
-        f"you know\", or [[GROUNDED:no]] if the answer (or any key fact like a name/date/number) "
-        f"was not in \"What you know\" and you declined or guessed. Never mention this tag."
+        f"SYSTEM (do NOT show the customer): after your full reply, on a new final line, output "
+        f"exactly ONE classification tag:\n"
+        f"[[STATUS:answered]] — you answered it and every specific fact came from \"What you "
+        f"know\".\n"
+        f"[[STATUS:gap]] — the question is about US / our subject area (the same domain as "
+        f"\"What you know\"), but the specific answer is NOT written there, so you declined. "
+        f"(This is a real knowledge gap a colleague should fill.)\n"
+        f"[[STATUS:offtopic]] — a greeting, thanks, small talk, or a question unrelated to us "
+        f"and our knowledge (general world facts, other organisations, chit-chat).\n"
+        f"Choose 'gap' ONLY when the missing answer is something we should plausibly know about "
+        f"ourselves. Never mention this tag."
     )
 
     try:
@@ -208,18 +237,22 @@ def answer_question(
     except LLMError as exc:
         raise RagUnavailable(str(exc)) from exc
 
-    # The model self-reports whether it could actually ground the answer. This
-    # overrides retrieval-based confidence: on-topic chunks can be retrieved yet
-    # still not contain the specific answer (e.g. a follow-up like "who was
-    # before him?"), and we must NOT call a guessed answer confident.
-    answer_text, grounded = _extract_grounding(res.text)
-    if grounded is False:
-        confident = False
+    # The model classifies the turn (answered / gap / offtopic). This is the
+    # authoritative signal, overriding the retrieval heuristic in both directions
+    # (a below-threshold match that was still answered stays confident; an
+    # on-topic-but-unanswered turn becomes a gap). Fall back to retrieval only
+    # when the model omitted the tag.
+    answer_text, status = _extract_status(res.text)
+    if status is not None:
+        confident = status == "answered"
+    # Only an in-domain, unanswered turn ("gap") should be captured for review.
+    answer_status = status or ("answered" if confident else "offtopic")
 
     return AnswerResult(
         answer=answer_text,
         source="rag",
         confident=confident,
+        answer_status=answer_status,
         model=res.model,
         prompt_tokens=res.prompt_tokens,
         completion_tokens=res.completion_tokens,
