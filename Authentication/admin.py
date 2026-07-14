@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import APIKey, EmailChangeRequest, User
+from .models import APIKey, EmailChangeRequest, PasswordChangeCode, User
 
 
 @admin.register(User)
@@ -27,6 +27,22 @@ class EmailChangeRequestAdmin(admin.ModelAdmin):
         "id",
         "user",
         "new_email",
+        "code_hash",
+        "expires_at",
+        "attempts",
+        "created_at",
+        "updated_at",
+    )
+
+
+@admin.register(PasswordChangeCode)
+class PasswordChangeCodeAdmin(admin.ModelAdmin):
+    list_display = ("user", "is_used", "attempts", "expires_at", "created_at")
+    list_filter = ("is_used",)
+    search_fields = ("user__username",)
+    readonly_fields = (
+        "id",
+        "user",
         "code_hash",
         "expires_at",
         "attempts",

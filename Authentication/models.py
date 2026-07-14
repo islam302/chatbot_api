@@ -108,3 +108,44 @@ class EmailChangeRequest(TimestampedModel):
 
     def __str__(self):
         return f"EmailChange({self.user_id} -> {self.new_email})"
+
+
+class PasswordChangeCode(TimestampedModel):
+    """A one-time code emailed to a user to authorize a password change.
+
+    Same code mechanics as EmailChangeRequest (hashed, expiring, attempt-limited),
+    but it carries no new value — it only proves the user controls their email at
+    the moment of the change (a second factor on top of the current password).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="password_change_codes",
+    )
+    code_hash = models.CharField(max_length=64)
+    expires_at = models.DateTimeField()
+    is_used = models.BooleanField(default=False)
+    attempts = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["user", "is_used"])]
+
+    @staticmethod
+    def generate_code() -> str:
+        return f"{secrets.randbelow(1_000_000):06d}"
+
+    def set_code(self, raw_code: str) -> None:
+        self.code_hash = _hash_code(raw_code)
+
+    def code_matches(self, raw_code: str) -> bool:
+        return secrets.compare_digest(self.code_hash, _hash_code(raw_code or ""))
+
+    @property
+    def is_expired(self) -> bool:
+        return timezone.now() >= self.expires_at
+
+    def __str__(self):
+        return f"PasswordChangeCode({self.user_id})"

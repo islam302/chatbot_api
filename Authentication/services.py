@@ -12,7 +12,7 @@ from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 
-from .models import EmailChangeRequest, User
+from .models import EmailChangeRequest, PasswordChangeCode, User
 from .tokens import email_verification_token
 
 
@@ -30,6 +30,78 @@ class ActivationError(Exception):
     def __init__(self, message: str):
         self.message = message
         super().__init__(message)
+
+
+class PasswordChangeError(Exception):
+    """Raised when a password-change code is missing, bad, or expired."""
+
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(message)
+
+
+def start_password_change(user: User) -> PasswordChangeCode:
+    """Email a 6-digit code that authorizes the user's next password change.
+
+    Invalidates any earlier unused code. Requires the user to have an email.
+    """
+    if not user.email:
+        raise PasswordChangeError(
+            "Your account has no email to send a code to. Add one first."
+        )
+
+    PasswordChangeCode.objects.filter(user=user, is_used=False).update(is_used=True)
+
+    ttl = int(getattr(settings, "EMAIL_VERIFICATION_TTL_MINUTES", 15))
+    code = PasswordChangeCode.generate_code()
+    obj = PasswordChangeCode(
+        user=user, expires_at=timezone.now() + timedelta(minutes=ttl)
+    )
+    obj.set_code(code)
+    obj.save()
+
+    send_mail(
+        subject="Your password change code",
+        message=(
+            f"Hi {user.first_name or user.username},\n\n"
+            f"Use this code to confirm your password change:\n\n"
+            f"    {code}\n\n"
+            f"It expires in {ttl} minutes. If you didn't request this, someone may "
+            f"be trying to access your account — do NOT share this code."
+        ),
+        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+        recipient_list=[user.email],
+        fail_silently=False,
+    )
+    return obj
+
+
+def verify_password_change_code(user: User, code: str) -> None:
+    """Consume the latest pending password-change code, or raise PasswordChangeError."""
+    obj = (
+        PasswordChangeCode.objects.filter(user=user, is_used=False)
+        .order_by("-created_at")
+        .first()
+    )
+    if obj is None:
+        raise PasswordChangeError("No pending password change. Request a code first.")
+
+    max_attempts = int(getattr(settings, "EMAIL_VERIFICATION_MAX_ATTEMPTS", 5))
+    if obj.is_expired:
+        obj.is_used = True
+        obj.save(update_fields=["is_used", "updated_at"])
+        raise PasswordChangeError("The code has expired. Request a new one.")
+    if obj.attempts >= max_attempts:
+        obj.is_used = True
+        obj.save(update_fields=["is_used", "updated_at"])
+        raise PasswordChangeError("Too many attempts. Request a new code.")
+    if not obj.code_matches(code):
+        obj.attempts += 1
+        obj.save(update_fields=["attempts", "updated_at"])
+        raise PasswordChangeError("Incorrect code.")
+
+    obj.is_used = True
+    obj.save(update_fields=["is_used", "updated_at"])
 
 
 def build_activation_link(user: User) -> str:

@@ -28,10 +28,13 @@ from rest_framework.views import APIView
 from .services import (
     ActivationError,
     EmailChangeError,
+    PasswordChangeError,
     activate_user_by_token,
     confirm_email_change,
     send_activation_email,
     start_email_change,
+    start_password_change,
+    verify_password_change_code,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,6 +47,7 @@ ACCOUNT_AUTH = [APIKeyAuthentication, JWTAuthentication, SessionAuthentication]
 SELF_SERVICE_ACTIONS = {
     "me",
     "change_password",
+    "request_password_code",
     "change_email",
     "verify_email",
     "api_key",
@@ -237,9 +241,29 @@ class UserViewSet(viewsets.ModelViewSet):
         return Response(UserSerializer(request.user).data)
 
     @extend_schema(
+        request=None,
+        responses={200: None},
+        description="Step 1 of a password change: email a 6-digit code to the user. "
+        "Submit it (with old/new passwords) to change-password.",
+    )
+    @action(
+        detail=False,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated],
+        url_path="request-password-code",
+    )
+    def request_password_code(self, request):
+        try:
+            start_password_change(request.user)
+        except PasswordChangeError as exc:
+            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"detail": "A verification code was sent to your email."})
+
+    @extend_schema(
         request=ChangePasswordSerializer,
         responses={200: None},
-        description="Change your own password (requires current password).",
+        description="Change your own password. Requires the current password AND the "
+        "verification code emailed by request-password-code.",
     )
     @action(
         detail=False,
@@ -256,6 +280,11 @@ class UserViewSet(viewsets.ModelViewSet):
                 {"old_password": "Current password is incorrect."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        # Second factor: a code proving control of the user's email.
+        try:
+            verify_password_change_code(user, serializer.validated_data["code"])
+        except PasswordChangeError as exc:
+            return Response({"code": exc.message}, status=status.HTTP_400_BAD_REQUEST)
         user.set_password(serializer.validated_data["new_password"])
         user.save(update_fields=["password"])
         # Keep the current session valid after the password change.

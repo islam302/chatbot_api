@@ -160,11 +160,13 @@ class VerifyEmailSerializer(serializers.Serializer):
 
 
 class ChangePasswordSerializer(serializers.Serializer):
-    """Self-service password change — requires the current password."""
+    """Self-service password change — requires the current password AND a
+    verification code emailed to the user (request it via request-password-code)."""
 
     old_password = serializers.CharField(write_only=True)
     new_password = serializers.CharField(write_only=True)
     new_password_confirm = serializers.CharField(write_only=True)
+    code = serializers.CharField(min_length=4, max_length=8)
 
     def validate(self, attrs):
         if attrs["new_password"] != attrs["new_password_confirm"]:

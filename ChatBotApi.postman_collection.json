@@ -295,19 +295,33 @@
           }
         },
         {
-          "name": "Change my password",
+          "name": "Request password change code",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/request-password-code/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "request-password-code", ""]
+            },
+            "description": "Step 1 of the password change. Emails a 6-digit code to the logged-in user's email. Then submit it to change-password."
+          }
+        },
+        {
+          "name": "Change my password (old + new + code)",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"old_password\": \"CurrentPass123!\",\n  \"new_password\": \"NewStr0ng-Passw0rd!\",\n  \"new_password_confirm\": \"NewStr0ng-Passw0rd!\"\n}"
+              "raw": "{\n  \"old_password\": \"CurrentPass123!\",\n  \"new_password\": \"NewStr0ng-Passw0rd!\",\n  \"new_password_confirm\": \"NewStr0ng-Passw0rd!\",\n  \"code\": \"123456\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/users/change-password/",
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "users", "change-password", ""]
-            }
+            },
+            "description": "Step 2. Requires the current password AND the 6-digit code emailed by request-password-code. 400 if the old password is wrong, or the code is missing/wrong/expired."
           }
         },
         {

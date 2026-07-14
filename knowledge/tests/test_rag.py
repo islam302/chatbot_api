@@ -67,6 +67,35 @@ class AnswerQuestionTests(TestCase):
         self.assertEqual(len(res.sources), 2)
         self.assertIn("filename", res.sources[0])
 
+    def test_grounded_no_tag_forces_not_confident_and_is_stripped(self):
+        # Strict hits (would be confident) but the model reports it couldn't
+        # ground the answer → not confident, and the tag never reaches the user.
+        llm = FakeLLM(text="I don't have that information.\n[[GROUNDED:no]]")
+        res = self._run(hits=[make_hit("on-topic chunk")], llm=llm)
+        self.assertFalse(res.confident)
+        self.assertNotIn("GROUNDED", res.answer)
+        self.assertEqual(res.answer, "I don't have that information.")
+
+    def test_grounded_yes_tag_kept_confident_and_stripped(self):
+        llm = FakeLLM(text="We sell software.\n[[GROUNDED:yes]]")
+        res = self._run(hits=[make_hit("we sell software")], llm=llm)
+        self.assertTrue(res.confident)
+        self.assertEqual(res.answer, "We sell software.")
+
+    def test_missing_tag_keeps_retrieval_confidence(self):
+        # No tag → behavior unchanged (confident from strict retrieval).
+        res = self._run(hits=[make_hit("we sell software")])
+        self.assertTrue(res.confident)
+
+
+class ExtractGroundingTests(TestCase):
+    def test_parses_and_strips(self):
+        from knowledge.services.rag import _extract_grounding
+
+        self.assertEqual(_extract_grounding("ans\n[[GROUNDED:no]]"), ("ans", False))
+        self.assertEqual(_extract_grounding("ans [[GROUNDED:yes]]"), ("ans", True))
+        self.assertEqual(_extract_grounding("plain answer"), ("plain answer", None))
+
 
 class IsolationGuardTests(TestCase):
     """answer_question must NEVER search the shared table without a tenant."""

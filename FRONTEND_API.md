@@ -350,12 +350,29 @@ editable here** — it changes only through the verified flow below. The API key
 is never editable by the user. Returns the updated user, so refresh whatever
 copy of `me` you cache (name/username may have changed).
 
-### Change password — `POST /users/change-password/`
+### Change password (verified, two steps)
+A password change requires the current password **and** a code emailed to the
+user — a second factor proving they control the account's email.
+
+**Step 1 — request a code:** `POST /users/request-password-code/`  (empty body)
+Emails a **6-digit code** to the user's email (valid ~15 min). `400` if the
+account has no email.
+
+**Step 2 — change:** `POST /users/change-password/`
 ```json
-{ "old_password": "...", "new_password": "...", "new_password_confirm": "..." }
+{ "old_password": "...", "new_password": "...", "new_password_confirm": "...", "code": "123456" }
 ```
-Requires the current password. `200` on success; `400` if the old password is
-wrong or the new one fails validation.
+Requires the current password **and** the code. `200` on success; `400` if the
+old password is wrong, the code is missing/wrong/expired, or the new password
+fails validation (or after 5 wrong code attempts — request a new one).
+
+```js
+// Settings UI: password change flow
+await api("/users/request-password-code/", { method: "POST" });
+// ...user reads the code from their inbox...
+await api("/users/change-password/", { method: "POST",
+  body: { old_password, new_password, new_password_confirm, code } });
+```
 
 ### Change email (verified, two steps)
 Email is never set directly — the user must prove they control the new address.

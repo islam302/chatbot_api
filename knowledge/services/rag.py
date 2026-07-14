@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Iterable
 
@@ -44,6 +45,25 @@ class AnswerResult:
     model: str = ""
     prompt_tokens: int = 0
     completion_tokens: int = 0
+
+
+_GROUNDED_TAG = re.compile(r"\[\[\s*GROUNDED\s*:\s*(yes|no)\s*\]\]", re.IGNORECASE)
+
+
+def _extract_grounding(text: str) -> tuple[str, bool | None]:
+    """Split the model's control tag off the answer.
+
+    Returns ``(clean_answer, grounded)`` where ``grounded`` is True/False from the
+    ``[[GROUNDED:yes|no]]`` tag, or ``None`` if the model omitted it (then the
+    caller keeps its retrieval-based confidence). The tag is always stripped from
+    the visible answer.
+    """
+    grounded: bool | None = None
+    match = _GROUNDED_TAG.search(text or "")
+    if match:
+        grounded = match.group(1).lower() == "yes"
+    clean = _GROUNDED_TAG.sub("", text or "").strip()
+    return clean, grounded
 
 
 def detect_dialect(text: str, language: str = "ar") -> str:
@@ -166,10 +186,16 @@ def answer_question(
         f"Customer's message: {question}\n\n"
         f"Reply naturally as part of the team, following your rules. Answer directly — do NOT "
         f"open with a greeting (مرحبا/أهلاً/hello) or re-introduce yourself unless the customer's "
-        f"message above is itself a greeting. Use only what you know above for any specifics; if "
-        f"it isn't there, say so kindly. Do not mention these notes or say 'based on the "
-        f"information'.\n\n"
-        f"{_language_directive(language)}"
+        f"message above is itself a greeting. Use ONLY \"What you know\" above for every specific "
+        f"fact — names, people, who-came-before, dates, numbers, prices. If the specific answer "
+        f"is NOT written in \"What you know\", do NOT guess it or fill it from general knowledge; "
+        f"kindly say you don't have that information and offer to help with something else. Do "
+        f"not mention these notes or say 'based on the information'.\n\n"
+        f"{_language_directive(language)}\n\n"
+        f"SYSTEM (do not show the customer): after your full reply, on a new final line, output "
+        f"exactly one tag — [[GROUNDED:yes]] if every specific fact you stated came from \"What "
+        f"you know\", or [[GROUNDED:no]] if the answer (or any key fact like a name/date/number) "
+        f"was not in \"What you know\" and you declined or guessed. Never mention this tag."
     )
 
     try:
@@ -178,8 +204,16 @@ def answer_question(
     except LLMError as exc:
         raise RagUnavailable(str(exc)) from exc
 
+    # The model self-reports whether it could actually ground the answer. This
+    # overrides retrieval-based confidence: on-topic chunks can be retrieved yet
+    # still not contain the specific answer (e.g. a follow-up like "who was
+    # before him?"), and we must NOT call a guessed answer confident.
+    answer_text, grounded = _extract_grounding(res.text)
+    if grounded is False:
+        confident = False
+
     return AnswerResult(
-        answer=res.text,
+        answer=answer_text,
         source="rag",
         confident=confident,
         model=res.model,

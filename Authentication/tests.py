@@ -242,6 +242,79 @@ class CreateUserBlockingVerificationTests(APITestCase):
         self.assertEqual(len(mail.outbox), 0)
 
 
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+class PasswordChangeWithCodeTests(APITestCase):
+    OLD = "Old!Pass2026"
+    NEW = "New!Str0ng2026"
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice", password=self.OLD, email="alice@example.com"
+        )
+        self.client.force_authenticate(user=self.user)
+
+    def _request_code(self):
+        return self.client.post(reverse("user-request-password-code"))
+
+    def _change(self, code, old=None, new=None):
+        return self.client.post(
+            reverse("user-change-password"),
+            {
+                "old_password": old or self.OLD,
+                "new_password": new or self.NEW,
+                "new_password_confirm": new or self.NEW,
+                "code": code,
+            },
+            format="json",
+        )
+
+    @mock.patch("Authentication.models.PasswordChangeCode.generate_code", return_value=FIXED_CODE)
+    def test_request_code_emails_it(self, _):
+        res = self._request_code()
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["alice@example.com"])
+        self.assertIn(FIXED_CODE, mail.outbox[0].body)
+
+    @mock.patch("Authentication.models.PasswordChangeCode.generate_code", return_value=FIXED_CODE)
+    def test_full_flow_changes_password(self, _):
+        self._request_code()
+        res = self._change(FIXED_CODE)
+        self.assertEqual(res.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(self.NEW))
+
+    @mock.patch("Authentication.models.PasswordChangeCode.generate_code", return_value=FIXED_CODE)
+    def test_wrong_code_rejected_password_unchanged(self, _):
+        self._request_code()
+        res = self._change("000000")
+        self.assertEqual(res.status_code, 400)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(self.OLD))
+
+    def test_change_without_requesting_code_rejected(self):
+        res = self._change("123456")
+        self.assertEqual(res.status_code, 400)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(self.OLD))
+
+    @mock.patch("Authentication.models.PasswordChangeCode.generate_code", return_value=FIXED_CODE)
+    def test_wrong_old_password_rejected(self, _):
+        self._request_code()
+        res = self._change(FIXED_CODE, old="not-the-old-password")
+        self.assertEqual(res.status_code, 400)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(self.OLD))
+
+    def test_code_field_is_required(self):
+        res = self.client.post(
+            reverse("user-change-password"),
+            {"old_password": self.OLD, "new_password": self.NEW, "new_password_confirm": self.NEW},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400)
+
+
 class ApiKeyImmutabilityTests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="alice", password="x")
