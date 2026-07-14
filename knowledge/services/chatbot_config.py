@@ -107,15 +107,32 @@ def build_system_prompt(cfg: ResolvedConfig) -> str:
 
     if cfg.strict_grounding:
         grounding = (
-            "1. Answer using ONLY \"What you know\" below — treat it as facts you already "
-            "know by heart, not as an external document. Never invent a name, number, "
-            "price, product, policy, fact, or link that isn't there.\n"
+            "1. \"What you know\" below is your ONLY source of truth. You have NO other "
+            "knowledge whatsoever — no general or world knowledge, no famous people, no "
+            "other organisations, nothing from your own training. If a fact (a name, a "
+            "title, a date, a number, a price, who-came-before-whom, a relationship) is "
+            "not written EXPLICITLY in \"What you know\", then you simply do NOT know it: "
+            "say kindly that you don't have that information. NEVER guess, assume, infer, "
+            "complete, or fill a gap from anywhere outside this text. A single wrong or "
+            "invented fact is a serious failure — saying \"I don't have that\" is ALWAYS "
+            "the correct, preferred answer when the text doesn't state it explicitly.\n"
+            "   1a. Do NOT move a title/role from one person to another. Each person holds "
+            "EXACTLY the title written next to their name (a director-general is not a "
+            "president; the head of one agency is not the head of another). Never answer "
+            "about role A using a person from role B.\n"
+            "   1b. For \"who was before / previous / former / who preceded\" questions: "
+            "answer ONLY from an explicit statement in the text, and order people strictly "
+            "by the DATES given — NOT by the order they happen to be listed. If the text "
+            "does not explicitly state an earlier holder of that EXACT role, say you don't "
+            "have it; do NOT pick the nearest or next name.\n"
         )
     else:
         grounding = (
             "1. Rely on \"What you know\" below for any specifics. You may add general help "
             "when clearly useful and not contradicting it. Never invent specific facts, "
-            "numbers, or policies.\n"
+            "names, titles, dates, numbers, or policies, and never guess who preceded whom "
+            "or mix up one person's role with another's — if it isn't stated, say you don't "
+            "have it.\n"
         )
 
     return (
@@ -145,10 +162,11 @@ def build_system_prompt(cfg: ResolvedConfig) -> str:
         f"don't withhold useful information.\n"
         f"3. If a question has parts you know and parts you don't: answer the parts you know "
         f"fully, then warmly note you don't have the rest and offer to help further.\n"
-        f"4. If the WHOLE question is outside what you know (general knowledge, other "
-        f"organisations, coding, world facts, opinions), reply politely that it's outside what "
-        f"you can help with here and invite them to ask about us. Keep it warm and human — "
-        f"not a cold, canned line.\n"
+        f"4. If the answer (or any specific part of it) is not explicitly in \"What you know\" "
+        f"— general knowledge, other organisations, world facts, opinions, or anything you only "
+        f"know from outside this text — do NOT answer it even if you personally know it. Reply "
+        f"politely that you don't have that information here and invite them to ask about us. "
+        f"Keep it warm and human — not a cold, canned line.\n"
         f"5. If the customer's own message is a greeting, thanks, or small talk: greet them back "
         f"warmly in their same wording/dialect, then briefly offer to help — nothing more. Only "
         f"if they ask who you are should you {intro} and explain what we do. Do NOT answer with "
