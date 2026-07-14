@@ -31,6 +31,24 @@
       "name": "Auth",
       "item": [
         {
+          "name": "Register (public self-signup)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"newuser\",\n  \"email\": \"newuser@example.com\",\n  \"first_name\": \"New\",\n  \"last_name\": \"User\",\n  \"password\": \"Str0ng-Passw0rd!\",\n  \"password_confirm\": \"Str0ng-Passw0rd!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "register", ""]
+            },
+            "description": "Public — anyone can sign up (no admin). Email is required and must be unique. Creates the account INACTIVE and emails an activation link; the user activates via POST /auth/verify-email/ before they can log in. Rate-limited (5/min per IP). Cannot self-grant staff/admin."
+          }
+        },
+        {
           "name": "Login (obtain JWT)",
           "event": [
             {
@@ -857,7 +875,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Pro\",\n  \"slug\": \"pro\",\n  \"description\": \"Professional tier\",\n  \"price_usd\": \"49.00\",\n  \"monthly_questions\": 5000,\n  \"monthly_token_cap\": 1000000,\n  \"max_documents\": 100,\n  \"max_total_mb\": 500,\n  \"max_requests_per_min\": 60,\n  \"llm_model\": \"claude-haiku-4-5-20251001\",\n  \"is_active\": true,\n  \"sort_order\": 1\n}"
+              "raw": "{\n  \"name\": \"Pro\",\n  \"slug\": \"pro\",\n  \"description\": \"Professional tier\",\n  \"price_usd\": \"49.00\",\n  \"monthly_questions\": 5000,\n  \"monthly_token_cap\": 1000000,\n  \"included_credits\": 4000,\n  \"max_documents\": 100,\n  \"max_total_mb\": 500,\n  \"max_requests_per_min\": 60,\n  \"llm_model\": \"claude-haiku-4-5-20251001\",\n  \"is_active\": true,\n  \"sort_order\": 1\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/plans/",
@@ -942,6 +960,23 @@
           }
         },
         {
+          "name": "Add credits (admin top-up)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user\": \"{{user_id}}\",\n  \"amount\": 100\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/subscriptions/add-credits/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "subscriptions", "add-credits", ""]
+            },
+            "description": "Admin only. Add credits to a user's wallet. Each chat question costs CREDITS_PER_QUESTION (default 2). Returns the new balance."
+          }
+        },
+        {
           "name": "Retrieve subscription",
           "request": {
             "method": "GET",
@@ -975,7 +1010,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "my-subscription", ""]
             },
-            "description": "The caller's own subscription + live usage for the current period (any authenticated user)."
+            "description": "The caller's own subscription + live usage + credit balance for the current period (any authenticated user). Response includes a `credits` block: { balance, credits_per_question, questions_left }."
           }
         }
       ]

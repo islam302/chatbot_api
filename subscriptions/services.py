@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from django.conf import settings
+from django.db.models import F
 from django.utils import timezone
 
-from .models import Plan, Subscription, SubscriptionStatus
+from .models import CreditWallet, Plan, Subscription, SubscriptionStatus
 
 
 def resolve_plan(ref):
@@ -48,7 +50,58 @@ def assign_plan(user, plan, *, duration_days=30, auto_renew=True):
             "auto_renew": auto_renew,
         },
     )
+    # Grant the plan's credit allotment on assignment/renewal.
+    if plan.included_credits:
+        add_credits(user, plan.included_credits)
     return sub
+
+
+# --- Credits ----------------------------------------------------------------
+
+
+def get_wallet(user) -> CreditWallet:
+    """The tenant's wallet, created on first use with the one-time free grant."""
+    wallet, _ = CreditWallet.objects.get_or_create(
+        user=user,
+        defaults={"balance": int(getattr(settings, "FREE_TIER_CREDITS", 0))},
+    )
+    return wallet
+
+
+def credit_balance(user) -> int:
+    if user is None or not getattr(user, "is_authenticated", False):
+        return 0
+    return get_wallet(user).balance
+
+
+def credits_per_question() -> int:
+    return max(1, int(getattr(settings, "CREDITS_PER_QUESTION", 2)))
+
+
+def has_credits_for_question(user) -> bool:
+    return credit_balance(user) >= credits_per_question()
+
+
+def add_credits(user, amount: int) -> int:
+    """Add ``amount`` credits (top-up / plan grant). Returns the new balance."""
+    amount = max(0, int(amount or 0))
+    wallet = get_wallet(user)
+    if amount:
+        CreditWallet.objects.filter(pk=wallet.pk).update(balance=F("balance") + amount)
+        wallet.refresh_from_db(fields=["balance"])
+    return wallet.balance
+
+
+def deduct_credits(user, amount: int | None = None) -> int:
+    """Spend credits for one question (default ``CREDITS_PER_QUESTION``), never
+    below zero. Returns the new balance."""
+    cost = credits_per_question() if amount is None else max(0, int(amount))
+    wallet = get_wallet(user)
+    new_balance = max(0, wallet.balance - cost)
+    if new_balance != wallet.balance:
+        CreditWallet.objects.filter(pk=wallet.pk).update(balance=new_balance)
+        wallet.balance = new_balance
+    return wallet.balance
 
 
 def get_subscription(user):

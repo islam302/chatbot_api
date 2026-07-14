@@ -19,6 +19,7 @@ from .serializers import (
     ChangePasswordSerializer,
     CustomTokenObtainPairSerializer,
     ProfileUpdateSerializer,
+    PublicRegistrationSerializer,
     UserRegistrationSerializer,
     UserSerializer,
     VerifyEmailSerializer,
@@ -422,6 +423,52 @@ class APIKeyViewSet(viewsets.ModelViewSet):
         api_key.is_active = True
         api_key.save(update_fields=["is_active", "updated_at"])
         return Response(APIKeyAdminSerializer(api_key).data)
+
+
+class RegisterView(APIView):
+    """Public self-signup — anyone can create an account (no admin needed).
+
+    Same email-verification gate as admin-created accounts: the account is created
+    INACTIVE and an activation link is emailed; it cannot log in until the link is
+    opened (POST /auth/verify-email/). Rate-limited per IP against spam.
+    """
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes: list = []
+    throttle_scope = "register"
+
+    @extend_schema(
+        request=PublicRegistrationSerializer,
+        responses={201: None},
+        description="Register a new account. Creates it inactive and emails an "
+        "activation link; the user verifies to activate and log in.",
+    )
+    def post(self, request):
+        serializer = PublicRegistrationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        APIKey.objects.get_or_create(user=user)
+
+        # Block until verified: inactive + activation link (email is required here).
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+        email_verification = "activation_sent"
+        try:
+            send_activation_email(user)
+        except Exception:
+            logger.exception("Activation email failed for new signup %s", user.pk)
+            email_verification = "send_failed"
+
+        return Response(
+            {
+                "detail": "Account created. Check your email for a link to verify and "
+                "activate it before logging in.",
+                "username": user.username,
+                "email": user.email,
+                "email_verification": email_verification,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class EmailVerifyView(APIView):

@@ -27,6 +27,23 @@ Base URL:  https://una-ai-tools-apis.una-oic.org/chatbot-api/api/v1
 
 Two interchangeable ways to authenticate. Pick one per request.
 
+### Sign up — `POST /auth/register/`  (public, no auth)
+Anyone can create an account:
+```js
+await fetch(`${BASE}/auth/register/`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    username, email, first_name, last_name, password, password_confirm,
+  }),
+});
+// 201 -> { detail, username, email, email_verification: "activation_sent" | "send_failed" }
+```
+`email` is **required and unique**. The account is created **inactive** and an
+activation link is emailed — the user must verify (see "New accounts must verify"
+below) before they can log in. Rate-limited to 5/min per IP. `400` on validation
+errors (duplicate email/username, password mismatch/too weak).
+
 ### Option A — JWT (recommended for user-facing apps)
 
 **Login:**
@@ -266,6 +283,23 @@ Returns the tenant's own rollups + live quota:
 ```
 Admins can pass `?scope=all` for a per-tenant breakdown.
 
+### Credits & plan — `GET /my-subscription/`
+Every chat question costs **credits** (default **2 credits/question**). A new
+tenant starts on the **free tier** (100 credits = 50 questions). When the balance
+can't cover a question, `POST /chat/` returns **`402`** — show an upgrade/top-up CTA.
+
+```json
+{
+  "subscription": { ... } | null,
+  "on_free_tier": true,
+  "credits": { "balance": 96, "credits_per_question": 2, "questions_left": 48 },
+  "usage": { "documents_used": 1, "documents_limit": 1, "storage_mb_limit": 0.5, ... }
+}
+```
+Read `credits.questions_left` to show "N questions left" and gate the UI before
+the user hits the `402`. Credits are granted by the plan (`included_credits`) or
+an admin top-up (`POST /subscriptions/add-credits/`, admin only).
+
 ---
 
 ## 8. Unanswered questions (knowledge gaps)
@@ -416,6 +450,7 @@ Errors return JSON `{ "detail": "..." }` (or field errors for 400 validation).
 |--------|---------|-----------------|
 | `400` | Bad request / validation | Show the field message(s). |
 | `401` | Missing/expired token | Refresh token (§2) or send to login. |
+| `402` | Out of credits, or subscription expired | Show an **upgrade / top-up** CTA (see credits below). |
 | `403` | Tenant suspended / not allowed | Show "account suspended / no access". |
 | `413` | Document/storage quota exceeded | Tell the user to delete docs or upgrade. |
 | `429` | Rate limit or monthly token budget hit | Back off / show "try again shortly". |

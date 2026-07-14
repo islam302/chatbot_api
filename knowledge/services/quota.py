@@ -57,6 +57,10 @@ class SubscriptionInactive(QuotaError):
     status_code = 402  # Payment Required
 
 
+class CreditsExhausted(QuotaError):
+    status_code = 402  # Payment Required — out of credits, upgrade/top up
+
+
 # --- Limit resolution -------------------------------------------------------
 
 
@@ -231,6 +235,31 @@ def check_chat_allowed(user) -> None:
         raise TokenBudgetExceeded(
             "Usage budget exhausted for this period. It resets next cycle."
         )
+
+    # Credit balance: each question costs CREDITS_PER_QUESTION credits.
+    try:
+        from subscriptions.services import has_credits_for_question
+    except Exception:
+        has_credits_for_question = None
+    if has_credits_for_question is not None and not has_credits_for_question(user):
+        raise CreditsExhausted(
+            "You're out of credits. Upgrade your plan to keep asking questions."
+        )
+
+
+def charge_question(user) -> None:
+    """Spend one question's worth of credits after a successful answer.
+
+    Best-effort: a billing hiccup must never break a reply the user already got.
+    """
+    try:
+        from subscriptions.services import deduct_credits
+
+        deduct_credits(user)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("Credit deduction failed")
 
 
 # --- Metering ---------------------------------------------------------------

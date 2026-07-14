@@ -171,7 +171,8 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.ScopedRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "login": "10/min",   # brute-force / credential-stuffing protection
+        "login": "10/min",      # brute-force / credential-stuffing protection
+        "register": "5/min",    # limit public self-signup abuse per IP
     },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
@@ -312,6 +313,12 @@ EMBEDDING_PRICING = {
     "text-embedding-3-large": 0.13,
     "text-embedding-3-small": 0.02,
 }
+
+# --- Credits ----------------------------------------------------------------
+# Each chat question costs this many credits; a new tenant starts with the free
+# grant (once). Paid plans add Plan.included_credits on assignment.
+CREDITS_PER_QUESTION = int(os.getenv("CREDITS_PER_QUESTION", "2"))
+FREE_TIER_CREDITS = int(os.getenv("FREE_TIER_CREDITS", "100"))  # 100 / 2 = 50 questions
 
 # --- Ingestion execution ----------------------------------------------------
 # How document ingestion runs:

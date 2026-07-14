@@ -82,6 +82,20 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         return User.objects.create_user(**validated_data)
 
 
+class PublicRegistrationSerializer(UserRegistrationSerializer):
+    """Public self-signup: same as admin registration, but email is REQUIRED and
+    must be unique (it's the address we send the activation link to). Only the
+    safe fields are accepted — never is_staff/is_superuser."""
+
+    email = serializers.EmailField(required=True)
+
+    def validate_email(self, value):
+        value = value.strip().lower()
+        if User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError("An account with this email already exists.")
+        return value
+
+
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):

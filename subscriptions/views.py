@@ -1,5 +1,6 @@
 from drf_spectacular.utils import extend_schema
 from rest_framework import permissions, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -59,6 +60,39 @@ class SubscriptionViewSet(viewsets.ModelViewSet):
         sub = serializer.save()
         return Response(SubscriptionSerializer(sub).data, status=status.HTTP_201_CREATED)
 
+    @extend_schema(
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "user": {"type": "string", "description": "User id"},
+                    "amount": {"type": "integer", "description": "Credits to add"},
+                },
+                "required": ["user", "amount"],
+            }
+        },
+        responses={200: dict},
+        description="Admin: add credits to a user's wallet (top-up).",
+    )
+    @action(detail=False, methods=["post"], url_path="add-credits")
+    def add_credits(self, request):
+        from django.contrib.auth import get_user_model
+
+        from .services import add_credits, credit_balance
+
+        user_id = request.data.get("user")
+        try:
+            amount = int(request.data.get("amount"))
+        except (TypeError, ValueError):
+            return Response({"detail": "amount must be an integer."}, status=400)
+        if amount <= 0:
+            return Response({"detail": "amount must be positive."}, status=400)
+        target = get_user_model().objects.filter(pk=user_id).first()
+        if target is None:
+            return Response({"detail": "Unknown user."}, status=404)
+        add_credits(target, amount)
+        return Response({"user": str(target.pk), "balance": credit_balance(target)})
+
 
 class MySubscriptionView(APIView):
     """The caller's own subscription + live usage for the current period."""
@@ -92,10 +126,20 @@ class MySubscriptionView(APIView):
         except Subscription.DoesNotExist:
             sub = None
 
+        from .services import credit_balance, credits_per_question
+
+        balance = credit_balance(user)
+        per_q = credits_per_question()
+
         return Response(
             {
                 "subscription": SubscriptionSerializer(sub).data if sub else None,
                 "on_free_tier": sub is None,
+                "credits": {
+                    "balance": balance,
+                    "credits_per_question": per_q,
+                    "questions_left": balance // per_q,
+                },
                 "usage": {
                     "questions_used": questions_used,
                     "questions_limit": limits.monthly_questions,            # 0 = unlimited

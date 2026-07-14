@@ -133,6 +133,87 @@ class EmailChangeTests(APITestCase):
 
 
 @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+class PublicRegistrationTests(APITestCase):
+    def setUp(self):
+        # ScopedRateThrottle counts persist in the cache across tests — reset so
+        # the 5/min register limit doesn't bleed between test methods.
+        from django.core.cache import cache
+
+        cache.clear()
+
+    def _register(self, **overrides):
+        body = {
+            "username": "signup",
+            "email": "signup@example.com",
+            "first_name": "Sign",
+            "last_name": "Up",
+            "password": "Str0ng-Passw0rd!",
+            "password_confirm": "Str0ng-Passw0rd!",
+        }
+        body.update(overrides)
+        return self.client.post(reverse("register-public"), body, format="json")
+
+    def test_anyone_can_register_no_auth(self):
+        res = self._register()
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.data["email_verification"], "activation_sent")
+        user = User.objects.get(username="signup")
+        # Created inactive + unverified, with an API key, and NOT staff.
+        self.assertFalse(user.is_active)
+        self.assertFalse(user.email_verified)
+        self.assertFalse(user.is_staff)
+        self.assertTrue(hasattr(user, "api_key"))
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("/verify-email?uid=", mail.outbox[0].body)
+
+    def test_cannot_log_in_until_verified(self):
+        self._register()
+        res = self.client.post(
+            reverse("token_obtain_pair"),
+            {"username": "signup", "password": "Str0ng-Passw0rd!"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 401)
+
+    def test_activation_then_login_works(self):
+        self._register()
+        user = User.objects.get(username="signup")
+        uid = urlsafe_base64_encode(force_bytes(str(user.pk)))
+        token = email_verification_token.make_token(user)
+        act = self.client.post(
+            reverse("verify-email-public"), {"uid": uid, "token": token}, format="json"
+        )
+        self.assertEqual(act.status_code, 200)
+        login = self.client.post(
+            reverse("token_obtain_pair"),
+            {"username": "signup", "password": "Str0ng-Passw0rd!"},
+            format="json",
+        )
+        self.assertEqual(login.status_code, 200)
+
+    def test_email_required(self):
+        res = self._register(email="")
+        self.assertEqual(res.status_code, 400)
+
+    def test_duplicate_email_rejected(self):
+        User.objects.create_user(username="other", password="x", email="taken@example.com")
+        res = self._register(email="taken@example.com")
+        self.assertEqual(res.status_code, 400)
+
+    def test_cannot_self_grant_staff(self):
+        # Extra privilege fields in the body must be ignored.
+        res = self._register(is_staff=True, is_superuser=True)
+        self.assertEqual(res.status_code, 201)
+        user = User.objects.get(username="signup")
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
+
+    def test_password_mismatch_rejected(self):
+        res = self._register(password_confirm="different")
+        self.assertEqual(res.status_code, 400)
+
+
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
 class CreateUserBlockingVerificationTests(APITestCase):
     def setUp(self):
         self.admin = User.objects.create_user(

@@ -180,3 +180,54 @@ class SubscriptionApiTests(APITestCase):
         # Documents/storage usage + remaining are reported too.
         self.assertIn("documents_remaining", usage)
         self.assertIn("storage_mb_remaining", usage)
+
+
+class CreditTests(APITestCase):
+    def setUp(self):
+        self.user, self.key = make_tenant("wallet_user")
+
+    def test_free_wallet_starts_at_free_tier_credits(self):
+        # Default FREE_TIER_CREDITS = 100 → 50 questions at 2 credits each.
+        self.assertEqual(services.credit_balance(self.user), 100)
+        self.assertTrue(services.has_credits_for_question(self.user))
+
+    def test_deduct_defaults_to_two_per_question(self):
+        services.deduct_credits(self.user)
+        self.assertEqual(services.credit_balance(self.user), 98)
+
+    def test_deduct_floors_at_zero(self):
+        services.deduct_credits(self.user, 1000)
+        self.assertEqual(services.credit_balance(self.user), 0)
+        self.assertFalse(services.has_credits_for_question(self.user))
+
+    def test_check_chat_allowed_blocks_when_out_of_credits(self):
+        services.deduct_credits(self.user, 100)  # empty the wallet
+        with self.assertRaises(quota.CreditsExhausted) as ctx:
+            quota.check_chat_allowed(self.user)
+        self.assertEqual(ctx.exception.status_code, 402)
+
+    def test_check_chat_allowed_passes_with_credits(self):
+        quota.check_chat_allowed(self.user)  # 100 credits → fine, no raise
+
+    def test_assign_plan_grants_included_credits(self):
+        plan = make_plan(slug="pro", included_credits=2000)
+        services.assign_plan(self.user, plan)
+        self.assertEqual(services.credit_balance(self.user), 2100)  # 100 free + 2000
+
+    def test_admin_add_credits_endpoint(self):
+        admin, admin_key = make_tenant("credit_admin", is_staff=True)
+        res = self.client.post(
+            reverse("subscription-add-credits"),
+            {"user": str(self.user.pk), "amount": 50},
+            format="json",
+            HTTP_X_API_KEY=admin_key,
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["balance"], 150)
+
+    def test_my_subscription_reports_credits(self):
+        res = self.client.get(reverse("my-subscription"), HTTP_X_API_KEY=self.key)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["credits"]["balance"], 100)
+        self.assertEqual(res.data["credits"]["credits_per_question"], 2)
+        self.assertEqual(res.data["credits"]["questions_left"], 50)

@@ -61,6 +61,23 @@ class ChatEndpointTests(APITestCase):
         self.assertEqual(rec.tokens_out, 30)
         self.assertEqual(rec.chunk_count, 1)
 
+    def test_credits_deducted_on_answer(self):
+        from subscriptions.services import credit_balance
+
+        start = credit_balance(self.user)  # free grant (100)
+        with mock.patch.object(chat_view, "answer_question", return_value=_fake_answer()):
+            self._post({"question": "hi"}, key=self.key)
+        self.assertEqual(credit_balance(self.user), start - 2)
+
+    def test_out_of_credits_returns_402(self):
+        from subscriptions.services import deduct_credits
+
+        deduct_credits(self.user, 1000)  # empty the wallet
+        with mock.patch.object(chat_view, "answer_question", return_value=_fake_answer()) as aq:
+            res = self._post({"question": "hi"}, key=self.key)
+        self.assertEqual(res.status_code, 402)
+        aq.assert_not_called()  # blocked before the LLM runs
+
     def test_rate_limit_returns_429(self):
         TenantQuota.objects.update_or_create(
             user=self.user, defaults={"max_requests_per_min": 1}

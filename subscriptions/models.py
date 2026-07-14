@@ -41,6 +41,9 @@ class Plan(TimestampedModel):
     monthly_questions = models.PositiveIntegerField(default=0)
     # Fair-use safety net on cost. 0 = unlimited.
     monthly_token_cap = models.PositiveBigIntegerField(default=0)
+    # Credits granted to the wallet when this plan is assigned/renewed. Each chat
+    # question costs ``settings.CREDITS_PER_QUESTION`` credits.
+    included_credits = models.PositiveIntegerField(default=0)
 
     # Resource limits.
     max_documents = models.PositiveIntegerField(default=100)
@@ -99,3 +102,24 @@ class Subscription(TimestampedModel):
             self.status == SubscriptionStatus.ACTIVE
             and self.current_period_end > timezone.now()
         )
+
+
+class CreditWallet(TimestampedModel):
+    """A tenant's spendable credit balance. One chat question costs
+    ``settings.CREDITS_PER_QUESTION`` credits; when the balance can't cover a
+    question the chat is blocked (402) until they top up or upgrade.
+
+    New wallets start with ``settings.FREE_TIER_CREDITS`` (the free tier, granted
+    once). Paid plans add ``Plan.included_credits`` on assignment.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="credit_wallet",
+    )
+    balance = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return f"{self.user} — {self.balance} credits"

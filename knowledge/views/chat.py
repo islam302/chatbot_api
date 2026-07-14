@@ -90,6 +90,8 @@ class ChatAPIView(APIView):
             confident=result.confident,
             chunk_count=len(result.sources),
         )
+        # Charge the tenant's credits for this answered question.
+        quota.charge_question(request.user)
 
         # Capture ONLY an in-domain question the bot couldn't answer from the data
         # ("gap") — the model classified it, so greetings/off-topic are excluded.

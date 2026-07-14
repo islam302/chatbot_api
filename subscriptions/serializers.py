@@ -24,6 +24,7 @@ class PlanSerializer(serializers.ModelSerializer):
             "price_usd",
             "monthly_questions",
             "monthly_token_cap",
+            "included_credits",
             "max_documents",
             "max_total_mb",
             "max_requests_per_min",
@@ -88,16 +89,13 @@ class AssignSubscriptionSerializer(serializers.Serializer):
     auto_renew = serializers.BooleanField(default=True)
 
     def save(self):
+        from .services import assign_plan
+
         data = self.validated_data
-        now = timezone.now()
-        sub, _ = Subscription.objects.update_or_create(
-            user=data["user"],
-            defaults={
-                "plan": data["plan"],
-                "status": "active",
-                "current_period_start": now,
-                "current_period_end": now + timedelta(days=data["duration_days"]),
-                "auto_renew": data["auto_renew"],
-            },
+        # assign_plan sets the period AND grants the plan's included_credits.
+        return assign_plan(
+            data["user"],
+            data["plan"],
+            duration_days=data["duration_days"],
+            auto_renew=data["auto_renew"],
         )
-        return sub

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Plan, Subscription
+from .models import CreditWallet, Plan, Subscription
 
 
 @admin.register(Plan)
@@ -9,6 +9,7 @@ class PlanAdmin(admin.ModelAdmin):
         "name",
         "price_usd",
         "monthly_questions",
+        "included_credits",
         "monthly_token_cap",
         "max_documents",
         "llm_model",
@@ -32,6 +33,14 @@ class SubscriptionAdmin(admin.ModelAdmin):
         "auto_renew",
     )
     list_filter = ("status", "plan", "auto_renew")
+    search_fields = ("user__username",)
+    raw_id_fields = ("user",)
+    readonly_fields = ("id", "created_at", "updated_at")
+
+
+@admin.register(CreditWallet)
+class CreditWalletAdmin(admin.ModelAdmin):
+    list_display = ("user", "balance", "updated_at")
     search_fields = ("user__username",)
     raw_id_fields = ("user",)
     readonly_fields = ("id", "created_at", "updated_at")
