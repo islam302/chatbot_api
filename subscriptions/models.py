@@ -121,8 +121,10 @@ class CreditWallet(TimestampedModel):
     ``settings.CREDITS_PER_QUESTION`` credits; when the balance can't cover a
     question the chat is blocked (402) until they top up or upgrade.
 
-    New wallets start with ``settings.FREE_TIER_CREDITS`` (the free tier, granted
-    once). Paid plans add ``Plan.included_credits`` on assignment.
+    Free tier: the wallet starts with ``settings.FREE_TIER_CREDITS`` and is
+    LAZILY topped back up to that amount at the start of each calendar month
+    (see ``services.get_wallet``) — i.e. 50 questions per month. Paid plans add
+    ``Plan.included_credits`` on each payment instead.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -132,6 +134,8 @@ class CreditWallet(TimestampedModel):
         related_name="credit_wallet",
     )
     balance = models.PositiveIntegerField(default=0)
+    # When the monthly free-tier grant was last applied (for lazy renewal).
+    last_free_grant_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
         return f"{self.user} — {self.balance} credits"

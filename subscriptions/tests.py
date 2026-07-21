@@ -455,3 +455,47 @@ class AdminCreditExemptionTests(APITestCase):
         before = services.credit_balance(user)  # free grant
         self.assertTrue(services.spend_credits(user))
         self.assertEqual(services.credit_balance(user), before - 2)
+
+
+class MonthlyFreeRenewalTests(APITestCase):
+    """Free-tier credits renew each calendar month (50 questions/month)."""
+
+    def setUp(self):
+        self.user, _ = make_tenant("monthly")
+        self.wallet = services.get_wallet(self.user)  # created with 100
+
+    def _backdate_grant(self):
+        """Pretend the last grant happened last month."""
+        from subscriptions.models import CreditWallet
+
+        last_month = timezone.now().replace(day=1) - timedelta(days=1)
+        CreditWallet.objects.filter(pk=self.wallet.pk).update(
+            last_free_grant_at=last_month
+        )
+
+    def test_new_month_tops_back_up_to_free_credits(self):
+        services.deduct_credits(self.user, 10_000)   # spent everything
+        self.assertEqual(services.credit_balance(self.user), 0)
+        self._backdate_grant()
+        # First access in the new month renews the grant.
+        self.assertEqual(services.credit_balance(self.user), 100)
+        self.assertTrue(services.spend_credits(self.user))  # chat works again
+
+    def test_no_double_grant_in_same_month(self):
+        services.deduct_credits(self.user, 10_000)
+        self._backdate_grant()
+        self.assertEqual(services.credit_balance(self.user), 100)  # renewed
+        services.deduct_credits(self.user, 40)                     # 100 -> 60
+        self.assertEqual(services.credit_balance(self.user), 60)   # NOT re-topped
+
+    def test_renewal_never_reduces_a_higher_balance(self):
+        services.add_credits(self.user, 500)  # admin top-up: 100 + 500 = 600
+        self._backdate_grant()
+        self.assertEqual(services.credit_balance(self.user), 600)  # kept, not reset
+
+    def test_paid_plan_user_gets_no_free_renewal(self):
+        plan = make_plan(slug="paidplan", included_credits=0)
+        subscribe(self.user, plan)
+        services.deduct_credits(self.user, 10_000)
+        self._backdate_grant()
+        self.assertEqual(services.credit_balance(self.user), 0)  # no free grant

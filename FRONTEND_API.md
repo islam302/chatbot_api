@@ -289,9 +289,11 @@ Returns the tenant's own rollups + live quota:
 Admins can pass `?scope=all` for a per-tenant breakdown.
 
 ### Credits & plan — `GET /my-subscription/`
-Every chat question costs **credits** (default **2 credits/question**). A new
-tenant starts on the **free tier** (100 credits = 50 questions). When the balance
-can't cover a question, `POST /chat/` returns **`402`** — show an upgrade/top-up CTA.
+Every chat question costs **credits** (default **2 credits/question**). A
+free-tier tenant gets **100 credits per month (= 50 questions/month)** — the
+balance is automatically topped back up to 100 at the start of each calendar
+month. When the balance can't cover a question, `POST /chat/` returns **`402`**
+— show an "upgrade or wait for next month" CTA.
 
 ```json
 {

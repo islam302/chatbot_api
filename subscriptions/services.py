@@ -60,12 +60,44 @@ def assign_plan(user, plan, *, duration_days=30, auto_renew=True):
 
 
 def get_wallet(user) -> CreditWallet:
-    """The tenant's wallet, created on first use with the one-time free grant."""
-    wallet, _ = CreditWallet.objects.get_or_create(
+    """The tenant's wallet, created on first use with the free-tier grant.
+
+    Free-tier wallets RENEW monthly (lazily): on the first access in a new
+    calendar month the balance is topped back up to ``FREE_TIER_CREDITS``
+    (never reduced — admin top-ups above it are kept). Paid-plan tenants are
+    skipped; their credits come from payments.
+    """
+    wallet, created = CreditWallet.objects.get_or_create(
         user=user,
         defaults={"balance": int(getattr(settings, "FREE_TIER_CREDITS", 0))},
     )
+    if not created:
+        _maybe_renew_free_credits(wallet, user)
     return wallet
+
+
+def _maybe_renew_free_credits(wallet: CreditWallet, user) -> None:
+    """Top a free-tier wallet back up to FREE_TIER_CREDITS once per calendar
+    month. The conditional UPDATE is race-safe: concurrent first-of-month
+    requests apply the grant exactly once."""
+    if is_credit_exempt(user) or active_plan(user) is not None:
+        return  # paid/staff tenants don't get the monthly free grant
+    now = timezone.now()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if wallet.last_free_grant_at >= month_start:
+        return  # already granted this month
+    from django.db.models.functions import Greatest
+    from django.db.models import Value
+
+    free = int(getattr(settings, "FREE_TIER_CREDITS", 0))
+    updated = CreditWallet.objects.filter(
+        pk=wallet.pk, last_free_grant_at__lt=month_start
+    ).update(
+        balance=Greatest(F("balance"), Value(free)),
+        last_free_grant_at=now,
+    )
+    if updated:
+        wallet.refresh_from_db(fields=["balance", "last_free_grant_at"])
 
 
 def credit_balance(user) -> int:

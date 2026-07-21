@@ -13,9 +13,11 @@ operations guide (backend/ops).
   Enforcement is **race-safe**: the cost is atomically reserved *before*
   answering (a single conditional DB update), so parallel requests can never
   spend more than the balance; a failed answer (`503`) auto-refunds.
-- **Free tier** (a signup with no paid plan): a **one-time grant** of
-  `FREE_TIER_CREDITS` (**default 100 = 50 questions**) — it does **not renew**;
-  when it's spent, chat returns `402` until they upgrade or an admin tops up.
+- **Free tier** (a signup with no paid plan): `FREE_TIER_CREDITS` per month
+  (**default 100 = 50 questions/month**). When it's spent, chat returns `402`
+  for the rest of the month; at the start of the **next calendar month** the
+  balance is lazily topped back up to `FREE_TIER_CREDITS` (never reduced — an
+  admin top-up above it is kept; paid-plan tenants don't get this grant).
   Also tight data limits (**1 document, ~0.5 MB**, no external-API import), and
   **no API-key access** (the key is hidden: `402` on `/users/api-key/`, `null`
   in `/users/me/` and the login response).
@@ -210,7 +212,7 @@ Paddle sandbox test cards: use Paddle's documented sandbox card numbers.
 | Setting | Default | Meaning |
 |---------|---------|---------|
 | `CREDITS_PER_QUESTION` | `2` | Credits spent per chat answer. |
-| `FREE_TIER_CREDITS` | `100` | One-time grant for a new tenant (50 questions). |
+| `FREE_TIER_CREDITS` | `100` | Monthly free-tier grant (50 questions/month, lazily renewed each calendar month). |
 | `FREE_TIER_MAX_DOCUMENTS` | `1` | Free-tier document count. |
 | `FREE_TIER_MAX_TOTAL_MB` | `0.5` | Free-tier total storage. |
 | `FREE_TIER_ALLOW_API_SYNC` | `false` | Free-tier access to sync-api-content. |
