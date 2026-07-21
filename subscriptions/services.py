@@ -78,7 +78,18 @@ def credits_per_question() -> int:
     return max(1, int(getattr(settings, "CREDITS_PER_QUESTION", 2)))
 
 
+def is_credit_exempt(user) -> bool:
+    """Staff/superusers never spend credits — their usage is internal testing.
+
+    It is still metered in UsageRecord (tokens/cost analytics), just never
+    charged and never blocked with 402.
+    """
+    return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
+
+
 def has_credits_for_question(user) -> bool:
+    if is_credit_exempt(user):
+        return True
     return credit_balance(user) >= credits_per_question()
 
 
@@ -114,6 +125,8 @@ def spend_credits(user, amount: int | None = None) -> bool:
     atomic at the database, so two simultaneous requests on a wallet with only
     enough for one will see exactly one succeed and one fail.
     """
+    if is_credit_exempt(user):
+        return True  # admin/staff testing is free — nothing reserved
     cost = credits_per_question() if amount is None else max(0, int(amount))
     if cost == 0:
         return True
@@ -126,6 +139,8 @@ def spend_credits(user, amount: int | None = None) -> bool:
 
 def refund_credits(user, amount: int | None = None) -> int:
     """Return credits reserved by ``spend_credits`` when the answer failed."""
+    if is_credit_exempt(user):
+        return credit_balance(user)  # nothing was reserved — nothing to refund
     cost = credits_per_question() if amount is None else max(0, int(amount))
     return add_credits(user, cost)
 

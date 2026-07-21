@@ -297,10 +297,14 @@ can't cover a question, `POST /chat/` returns **`402`** — show an upgrade/top-
 {
   "subscription": { ... } | null,
   "on_free_tier": true,
-  "credits": { "balance": 96, "credits_per_question": 2, "questions_left": 48 },
+  "credits": { "balance": 96, "credits_per_question": 2, "exempt": false, "questions_left": 48 },
   "usage": { "documents_used": 1, "documents_limit": 1, "storage_mb_limit": 0.5, ... }
 }
 ```
+
+> `credits.exempt: true` means this user (admin/staff) never spends credits —
+> their usage is internal testing. `questions_left` is `null` then; show
+> "unlimited" instead of a counter.
 Read `credits.questions_left` to show "N questions left" and gate the UI before
 the user hits the `402`. Credits are granted by the plan (`included_credits`) or
 an admin top-up (`POST /subscriptions/add-credits/`, admin only).
@@ -481,6 +485,11 @@ const updated = await api("/users/verify-email/", { method: "POST", body: { code
 ### View my API key — `GET /users/api-key/`
 Read-only. Users **cannot** rotate their own key (only an admin can). Don't show
 a "regenerate" button in the user settings UI.
+
+> **Paid feature.** Free-tier users get **`402`** here, and `api_key` is `null`
+> in `GET /users/me/` and in the login response. Hide the API-key section for
+> them and show an upgrade CTA instead (check `credits`/plan via
+> `/my-subscription/`).
 
 ---
 

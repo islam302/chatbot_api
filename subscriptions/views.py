@@ -157,10 +157,11 @@ class MySubscriptionView(APIView):
         except Subscription.DoesNotExist:
             sub = None
 
-        from .services import credit_balance, credits_per_question
+        from .services import credit_balance, credits_per_question, is_credit_exempt
 
         balance = credit_balance(user)
         per_q = credits_per_question()
+        exempt = is_credit_exempt(user)
 
         return Response(
             {
@@ -169,7 +170,9 @@ class MySubscriptionView(APIView):
                 "credits": {
                     "balance": balance,
                     "credits_per_question": per_q,
-                    "questions_left": balance // per_q,
+                    # Admin/staff never spend credits (internal testing).
+                    "exempt": exempt,
+                    "questions_left": None if exempt else balance // per_q,
                 },
                 "usage": {
                     "questions_used": questions_used,

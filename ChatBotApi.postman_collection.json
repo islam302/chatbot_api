@@ -382,7 +382,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "users", "api-key", ""]
             },
-            "description": "View the current user's API key (read-only). Users cannot rotate it; only an admin can."
+            "description": "View the current user's API key (read-only). Users cannot rotate it; only an admin can. NOT available on the free tier — returns 402 (API-key access is a paid feature); free-tier users also get api_key: null in /users/me/ and the login response."
           }
         },
         {
@@ -1032,7 +1032,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "my-subscription", ""]
             },
-            "description": "The caller's own subscription + live usage + credit balance for the current period (any authenticated user). Response includes a `credits` block: { balance, credits_per_question, questions_left }."
+            "description": "The caller's own subscription + live usage + credit balance for the current period (any authenticated user). Response includes a `credits` block: { balance, credits_per_question, exempt, questions_left }. Admin/staff have exempt: true (usage is free testing, questions_left is null)."
           }
         }
       ]

@@ -416,3 +416,42 @@ class AtomicSpendTests(APITestCase):
         services.spend_credits(self.user)
         services.refund_credits(self.user)
         self.assertEqual(services.credit_balance(self.user), 2)
+
+
+class AdminCreditExemptionTests(APITestCase):
+    """Staff/superusers never spend credits — their usage is free testing."""
+
+    def setUp(self):
+        self.admin, self.admin_key = make_tenant("boss", is_staff=True)
+
+    def test_admin_is_exempt(self):
+        self.assertTrue(services.is_credit_exempt(self.admin))
+        self.assertTrue(services.has_credits_for_question(self.admin))
+
+    def test_spend_does_not_touch_admin_wallet(self):
+        before = services.credit_balance(self.admin)
+        self.assertTrue(services.spend_credits(self.admin))
+        self.assertEqual(services.credit_balance(self.admin), before)
+
+    def test_admin_never_blocked_even_with_empty_wallet(self):
+        services.deduct_credits(self.admin, 10_000)  # force balance to 0
+        self.assertEqual(services.credit_balance(self.admin), 0)
+        self.assertTrue(services.spend_credits(self.admin))   # still free
+        quota.check_chat_allowed(self.admin)                  # no 402 raise
+
+    def test_refund_is_noop_for_admin(self):
+        before = services.credit_balance(self.admin)
+        services.refund_credits(self.admin)
+        self.assertEqual(services.credit_balance(self.admin), before)
+
+    def test_my_subscription_shows_exempt(self):
+        res = self.client.get(reverse("my-subscription"), HTTP_X_API_KEY=self.admin_key)
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.data["credits"]["exempt"])
+        self.assertIsNone(res.data["credits"]["questions_left"])
+
+    def test_normal_user_still_charged(self):
+        user, _ = make_tenant("payer2")
+        before = services.credit_balance(user)  # free grant
+        self.assertTrue(services.spend_credits(user))
+        self.assertEqual(services.credit_balance(user), before - 2)

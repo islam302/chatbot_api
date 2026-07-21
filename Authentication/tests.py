@@ -401,10 +401,58 @@ class ApiKeyImmutabilityTests(APITestCase):
         self.user = User.objects.create_user(username="alice", password="x")
         self.client.force_authenticate(user=self.user)
 
-    def test_user_can_view_own_key(self):
+    def _give_plan(self, user):
+        from datetime import timedelta
+
+        from django.utils import timezone as tz
+
+        from subscriptions.models import Plan, Subscription
+
+        plan = Plan.objects.create(name="Paid", slug="paid")
+        now = tz.now()
+        Subscription.objects.create(
+            user=user, plan=plan, status="active",
+            current_period_start=now, current_period_end=now + timedelta(days=30),
+        )
+
+    def test_free_tier_cannot_view_key(self):
+        # API-key access is a paid feature: free tier gets 402, never the key.
+        res = self.client.get(reverse("user-api-key"))
+        self.assertEqual(res.status_code, 402)
+        self.assertNotIn("key", res.data)
+
+    def test_paid_user_can_view_own_key(self):
+        self._give_plan(self.user)
         res = self.client.get(reverse("user-api-key"))
         self.assertEqual(res.status_code, 200)
         self.assertIn("key", res.data)
+
+    def test_free_tier_me_hides_api_key(self):
+        from Authentication.models import APIKey
+
+        APIKey.objects.get_or_create(user=self.user)  # key exists...
+        res = self.client.get(reverse("user-me"))
+        self.assertIsNone(res.data["api_key"])        # ...but is never shown
+
+    def test_paid_me_shows_api_key(self):
+        from Authentication.models import APIKey
+
+        self._give_plan(self.user)
+        APIKey.objects.get_or_create(user=self.user)
+        res = self.client.get(reverse("user-me"))
+        self.assertIsNotNone(res.data["api_key"])
+
+    def test_admin_list_still_shows_free_tier_keys(self):
+        from Authentication.models import APIKey
+
+        APIKey.objects.get_or_create(user=self.user)
+        admin = User.objects.create_user(
+            username="root2", password="x", is_staff=True, is_superuser=True
+        )
+        self.client.force_authenticate(user=admin)
+        res = self.client.get(reverse("user-list"))
+        row = next(u for u in res.data["results"] if u["username"] == "alice")
+        self.assertIsNotNone(row["api_key"])  # admins manage keys for everyone
 
     def test_self_service_key_rotation_removed(self):
         # Users must NOT be able to rotate their key. The self-service endpoint is

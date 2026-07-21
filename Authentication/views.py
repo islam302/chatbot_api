@@ -348,7 +348,22 @@ class UserViewSet(viewsets.ModelViewSet):
         url_path="api-key",
     )
     def api_key(self, request):
-        """View the current user's API key (read-only — users cannot rotate it)."""
+        """View the current user's API key (read-only — users cannot rotate it).
+
+        NOT available on the free tier: API-key access is a paid feature, so a
+        free tenant gets 402 and never sees the key.
+        """
+        try:
+            from knowledge.services.quota import is_free_tier
+
+            free = is_free_tier(request.user)
+        except Exception:
+            free = not request.user.is_staff  # fail closed: never leak a key
+        if free:
+            return Response(
+                {"detail": "API key access is available on paid plans. Upgrade to enable it."},
+                status=status.HTTP_402_PAYMENT_REQUIRED,
+            )
         api_key, _ = APIKey.objects.get_or_create(user=request.user)
         return Response(APIKeySerializer(api_key).data)
 

@@ -14,8 +14,11 @@ operations guide (backend/ops).
   answering (a single conditional DB update), so parallel requests can never
   spend more than the balance; a failed answer (`503`) auto-refunds.
 - **Free tier** (a signup with no paid plan): a **one-time grant** of
-  `FREE_TIER_CREDITS` (**default 100 = 50 questions**), plus tight data limits
-  (**1 document, ~0.5 MB**, no external-API import).
+  `FREE_TIER_CREDITS` (**default 100 = 50 questions**) — it does **not renew**;
+  when it's spent, chat returns `402` until they upgrade or an admin tops up.
+  Also tight data limits (**1 document, ~0.5 MB**, no external-API import), and
+  **no API-key access** (the key is hidden: `402` on `/users/api-key/`, `null`
+  in `/users/me/` and the login response).
 - **Paid plans** top up credits and lift limits. A plan carries
   `included_credits` (granted per payment) and a `paddle_price_id` (the Paddle
   price it maps to).
@@ -23,6 +26,9 @@ operations guide (backend/ops).
   charges the card and calls our **webhook**; we grant credits / set the plan.
 - **Manual top-ups** (bank transfer / Instapay / wallet) are supported with **zero
   Paddle** via the admin endpoint — good for day-one selling.
+- **Admin/staff are credit-exempt.** Their chat usage is metered (UsageRecord)
+  but never charged and never blocked — internal testing is always free.
+  `GET /my-subscription/` reports `credits.exempt: true` for them.
 
 ---
 

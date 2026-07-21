@@ -17,6 +17,17 @@ def run_password_validation(password, *, user=None, field="password"):
         raise serializers.ValidationError({field: list(exc.messages)})
 
 
+def _is_free_tier(user) -> bool:
+    """Non-staff tenant with no active paid plan. Lazy import; on any failure we
+    treat the user as free tier so a billing-layer hiccup never leaks a key."""
+    try:
+        from knowledge.services.quota import is_free_tier
+
+        return is_free_tier(user)
+    except Exception:
+        return not getattr(user, "is_staff", False)
+
+
 class UserSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
     api_key = serializers.SerializerMethodField()
@@ -41,7 +52,17 @@ class UserSerializer(serializers.ModelSerializer):
         return "admin" if obj.is_staff else "user"
 
     def get_api_key(self, obj):
-        """The user's API key string (null if one hasn't been issued yet)."""
+        """The user's API key string (null if not issued yet).
+
+        HIDDEN (null) for free-tier tenants — API-key access is a paid feature.
+        Admin viewers (e.g. the admin user list) still see every key.
+        """
+        request = self.context.get("request")
+        viewer_is_staff = bool(
+            request is not None and getattr(getattr(request, "user", None), "is_staff", False)
+        )
+        if not viewer_is_staff and _is_free_tier(obj):
+            return None
         try:
             return obj.api_key.key
         except APIKey.DoesNotExist:
