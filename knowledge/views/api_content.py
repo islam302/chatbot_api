@@ -51,6 +51,23 @@ class SyncAPIContentView(APIView):
     )
     def post(self, request):
         """Fetch content from API and process for RAG."""
+        # Feature gate: importing knowledge from an external API is not on the
+        # free tier — upgrade required.
+        try:
+            from subscriptions.services import can_sync_api_content
+
+            allowed = can_sync_api_content(request.user)
+        except Exception:
+            allowed = True  # fail open: never block on a billing-layer hiccup
+        if not allowed:
+            return Response(
+                {
+                    "detail": "Importing content from an external API isn't available "
+                    "on the free plan. Upgrade to enable it."
+                },
+                status=status.HTTP_402_PAYMENT_REQUIRED,
+            )
+
         api_url = request.data.get("api_url")
         document_name = request.data.get("document_name", "API Content")
         items_key = request.data.get("items_key", "results")

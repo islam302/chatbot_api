@@ -78,6 +78,20 @@ class ChatEndpointTests(APITestCase):
         self.assertEqual(res.status_code, 402)
         aq.assert_not_called()  # blocked before the LLM runs
 
+    def test_credits_refunded_when_answer_fails(self):
+        # Credits are reserved BEFORE answering; if the LLM fails the user is
+        # refunded (never charged for a reply they didn't get).
+        from subscriptions.services import credit_balance
+        from knowledge.services.rag import RagUnavailable
+
+        start = credit_balance(self.user)
+        with mock.patch.object(
+            chat_view, "answer_question", side_effect=RagUnavailable("down")
+        ):
+            res = self._post({"question": "hi"}, key=self.key)
+        self.assertEqual(res.status_code, 503)
+        self.assertEqual(credit_balance(self.user), start)  # reserved then refunded
+
     def test_rate_limit_returns_429(self):
         TenantQuota.objects.update_or_create(
             user=self.user, defaults={"max_requests_per_min": 1}

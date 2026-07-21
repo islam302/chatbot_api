@@ -320,6 +320,29 @@ EMBEDDING_PRICING = {
 CREDITS_PER_QUESTION = int(os.getenv("CREDITS_PER_QUESTION", "2"))
 FREE_TIER_CREDITS = int(os.getenv("FREE_TIER_CREDITS", "100"))  # 100 / 2 = 50 questions
 
+# --- Free tier limits -------------------------------------------------------
+# Applied to non-staff tenants with NO active paid plan (public free signups).
+# Staff/admin and paid-plan tenants are unaffected. Keeps free data tiny: one
+# small Word file (~3 pages).
+FREE_TIER_MAX_DOCUMENTS = int(os.getenv("FREE_TIER_MAX_DOCUMENTS", "1"))
+FREE_TIER_MAX_TOTAL_MB = float(os.getenv("FREE_TIER_MAX_TOTAL_MB", "0.5"))
+# Free tier cannot import knowledge from an external API (sync-api-content).
+FREE_TIER_ALLOW_API_SYNC = os.getenv("FREE_TIER_ALLOW_API_SYNC", "false").lower() in {
+    "1", "true", "yes", "on"
+}
+
+# --- Paddle (Billing) -------------------------------------------------------
+# Server API key (outbound calls) and the WEBHOOK signing secret (to verify
+# incoming notifications). Keep both in .env only. Start in sandbox.
+PADDLE_API_KEY = os.getenv("PADDLE_API_KEY", "")
+PADDLE_WEBHOOK_SECRET = os.getenv("PADDLE_WEBHOOK_SECRET", "")
+PADDLE_ENV = os.getenv("PADDLE_ENV", "sandbox").lower()  # "sandbox" | "production"
+PADDLE_API_BASE = (
+    "https://api.paddle.com"
+    if PADDLE_ENV == "production"
+    else "https://sandbox-api.paddle.com"
+)
+
 # --- Ingestion execution ----------------------------------------------------
 # How document ingestion runs:
 #   "sync"   - in-request (default; simplest)

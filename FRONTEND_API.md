@@ -237,7 +237,8 @@ show `error_message`). Then `chunk_count` is the number of searchable pieces.
 ### Re-index — `POST /documents/{id}/reindex/`  → `202` (re-embeds the document)
 
 > Limits per tenant: **100 documents / 200 MB / 20 MB per file** by default.
-> Over the limit returns **413** (see §10).
+> Over the limit returns **413** (see §10). **Free-tier** tenants are much
+> tighter — **1 document, ~0.5 MB** (one small file); see §7.
 
 ---
 
@@ -248,6 +249,10 @@ Pull a JSON list from a URL into the tenant's knowledge.
 ```
 Returns sync stats: `{ "status", "processed", "chunks_created", "items_new", "items_updated", ... }`.
 Re-running only re-embeds changed items (incremental).
+
+> **Not on the free tier.** This endpoint returns **`402`** unless the tenant's
+> plan enables it (`allow_api_sync`). Free-tier users import knowledge only by
+> uploading a small file (§4). Show an upgrade CTA on `402`.
 
 ---
 
@@ -299,6 +304,43 @@ can't cover a question, `POST /chat/` returns **`402`** — show an upgrade/top-
 Read `credits.questions_left` to show "N questions left" and gate the UI before
 the user hits the `402`. Credits are granted by the plan (`included_credits`) or
 an admin top-up (`POST /subscriptions/add-credits/`, admin only).
+
+Enforcement is **strict and race-safe**: credits are atomically reserved
+*before* the answer is generated (parallel requests can never exceed the
+balance), and **auto-refunded** if the answer fails (a `503` never costs the
+user credits).
+
+**Free-tier limits** (a signup with no paid plan): **1 document, ~0.5 MB total**
+(one small Word file), and **no external-API import** (§5 returns `402`).
+Uploading a 2nd file or a larger one returns `413`. Paid plans lift these via
+their `max_documents` / `max_total_mb` / `allow_api_sync`.
+
+### Paying with Paddle (upgrade / buy credits)
+Payment runs through **Paddle Billing**. The **frontend** opens Paddle Checkout;
+the **backend** fulfills via a signed webhook — you never post payment data to
+this API.
+
+1. Each plan carries a `paddle_price_id` (from `GET /plans/`).
+2. On "Upgrade", open Paddle Checkout (Paddle.js) with that price and **pass the
+   logged-in user's id as `custom_data.user_id`** so the payment maps back:
+   ```js
+   Paddle.Checkout.open({
+     items: [{ priceId: plan.paddle_price_id, quantity: 1 }],
+     customer: { email: user.email },
+     customData: { user_id: user.id },   // REQUIRED for fulfillment
+   });
+   ```
+3. Paddle charges the customer, then calls our webhook
+   (`/api/v1/billing/paddle/webhook/`). On success the plan/credits are applied
+   server-side within seconds.
+4. After checkout closes, **re-fetch `GET /my-subscription/`** to show the new
+   balance/plan (fulfillment is async — poll once or twice if needed).
+
+You need the Paddle **client-side token** and **price ids** from the backend team
+(they live in the Paddle dashboard). Nothing else changes in your API calls.
+
+> Full payment setup, webhook events, testing, and go-live steps are in
+> **`PAYMENTS.md`** (backend/ops guide).
 
 ---
 
@@ -485,6 +527,17 @@ Require an **admin** token. Highlights:
 - `POST /users/{id}/regenerate-api-key/` — rotate a user's key (admin only; users can't rotate their own).
 - `POST /users/{id}/set-password/` — admin resets a user's password.
 - `GET /api-keys/`, `POST /api-keys/{id}/revoke|activate|regenerate/` — key control.
+
+**Plans & billing (admin):**
+- `GET /plans/` — anyone authenticated can list active plans (for a pricing page).
+  Admin `POST` / `PATCH` / `DELETE /plans/` manage them. Key fields: `price_usd`,
+  `included_credits`, `monthly_questions`, `max_documents`, `max_total_mb`,
+  `allow_api_sync`, `paddle_price_id`, `llm_model`.
+- `POST /subscriptions/` — assign/move a user to a plan (`{ user, plan, duration_days }`).
+- `POST /subscriptions/add-credits/` — top up a wallet (`{ user, amount }`).
+- `GET /subscriptions/` — list all subscriptions.
+- `POST /billing/paddle/webhook/` — **Paddle calls this, not you** (see §7). Public,
+  signature-verified; grants credits / sets the subscription on payment.
 
 ---
 

@@ -91,10 +91,26 @@ def _plan_limits(user) -> dict | None:
         return None
 
 
+def is_free_tier(user) -> bool:
+    """A non-staff tenant with no active paid plan (a public free signup).
+
+    Staff/admin and paid-plan tenants are NOT free tier, so the restrictive
+    free-tier document/storage limits never apply to them.
+    """
+    if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+        return False
+    return not _plan_limits(user)
+
+
 def effective_limits(user) -> EffectiveLimits:
-    """Resolve limits with precedence: per-tenant override > active plan > defaults."""
+    """Resolve limits with precedence: per-tenant override > active plan > defaults.
+
+    Free-tier tenants (no plan, not staff) get tiny document/storage defaults so
+    they can only upload a small Word file (~3 pages).
+    """
     quota = get_quota(user)
     plan = _plan_limits(user) or {}
+    free = is_free_tier(user)
 
     def pick(quota_val, key, setting_name, default, cast):
         if quota_val is not None:
@@ -103,9 +119,12 @@ def effective_limits(user) -> EffectiveLimits:
             return cast(plan[key])
         return cast(getattr(settings, setting_name, default))
 
+    doc_setting = "FREE_TIER_MAX_DOCUMENTS" if free else "TENANT_MAX_DOCUMENTS"
+    mb_setting = "FREE_TIER_MAX_TOTAL_MB" if free else "TENANT_MAX_TOTAL_MB"
+
     return EffectiveLimits(
-        max_documents=pick(quota.max_documents, "max_documents", "TENANT_MAX_DOCUMENTS", 100, int),
-        max_total_mb=pick(quota.max_total_mb, "max_total_mb", "TENANT_MAX_TOTAL_MB", 200, float),
+        max_documents=pick(quota.max_documents, "max_documents", doc_setting, 1 if free else 100, int),
+        max_total_mb=pick(quota.max_total_mb, "max_total_mb", mb_setting, 0.5 if free else 200, float),
         max_requests_per_min=pick(
             quota.max_requests_per_min, "max_requests_per_min", "TENANT_MAX_REQUESTS_PER_MIN", 60, int
         ),
@@ -247,19 +266,36 @@ def check_chat_allowed(user) -> None:
         )
 
 
-def charge_question(user) -> None:
-    """Spend one question's worth of credits after a successful answer.
+def reserve_question_credits(user) -> bool:
+    """ATOMICALLY reserve one question's credits BEFORE answering (race-safe).
 
-    Best-effort: a billing hiccup must never break a reply the user already got.
+    Returns True if the credits were reserved, False if the wallet couldn't cover
+    the cost (caller returns 402). If credits aren't wired up, returns True so the
+    chat still works. Reserving up-front is what makes it impossible to overspend
+    with concurrent requests.
     """
     try:
-        from subscriptions.services import deduct_credits
+        from subscriptions.services import spend_credits
 
-        deduct_credits(user)
+        return spend_credits(user)
     except Exception:
         import logging
 
-        logging.getLogger(__name__).exception("Credit deduction failed")
+        logging.getLogger(__name__).exception("Credit reserve failed; allowing")
+        return True
+
+
+def refund_question_credits(user) -> None:
+    """Give back credits reserved by ``reserve_question_credits`` when the answer
+    failed (LLM error), so a user is never charged for a reply they didn't get."""
+    try:
+        from subscriptions.services import refund_credits
+
+        refund_credits(user)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("Credit refund failed")
 
 
 # --- Metering ---------------------------------------------------------------

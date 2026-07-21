@@ -94,7 +94,8 @@ def add_credits(user, amount: int) -> int:
 
 def deduct_credits(user, amount: int | None = None) -> int:
     """Spend credits for one question (default ``CREDITS_PER_QUESTION``), never
-    below zero. Returns the new balance."""
+    below zero. Returns the new balance. Not race-safe — for the chat gate use
+    ``spend_credits`` instead."""
     cost = credits_per_question() if amount is None else max(0, int(amount))
     wallet = get_wallet(user)
     new_balance = max(0, wallet.balance - cost)
@@ -102,6 +103,68 @@ def deduct_credits(user, amount: int | None = None) -> int:
         CreditWallet.objects.filter(pk=wallet.pk).update(balance=new_balance)
         wallet.balance = new_balance
     return wallet.balance
+
+
+def spend_credits(user, amount: int | None = None) -> bool:
+    """ATOMICALLY reserve credits for one question. Returns True only if the
+    balance actually covered the cost and was decremented — this is the
+    race-safe gate so concurrent requests can never overspend a wallet.
+
+    The single conditional UPDATE (``balance >= cost`` → ``balance -= cost``) is
+    atomic at the database, so two simultaneous requests on a wallet with only
+    enough for one will see exactly one succeed and one fail.
+    """
+    cost = credits_per_question() if amount is None else max(0, int(amount))
+    if cost == 0:
+        return True
+    wallet = get_wallet(user)  # ensure it exists (with the free grant)
+    updated = CreditWallet.objects.filter(pk=wallet.pk, balance__gte=cost).update(
+        balance=F("balance") - cost
+    )
+    return bool(updated)
+
+
+def refund_credits(user, amount: int | None = None) -> int:
+    """Return credits reserved by ``spend_credits`` when the answer failed."""
+    cost = credits_per_question() if amount is None else max(0, int(amount))
+    return add_credits(user, cost)
+
+
+def set_paddle_subscription(
+    user, plan, *, paddle_subscription_id="", paddle_customer_id="", period_end=None
+):
+    """Create/refresh a Subscription from a Paddle event WITHOUT granting credits.
+
+    Credits are granted separately by ``transaction.completed`` so each payment
+    grants exactly once (see subscriptions/paddle.py).
+    """
+    now = timezone.now()
+    sub, _ = Subscription.objects.update_or_create(
+        user=user,
+        defaults={
+            "plan": plan,
+            "status": SubscriptionStatus.ACTIVE,
+            "current_period_start": now,
+            "current_period_end": period_end or (now + timedelta(days=30)),
+            "auto_renew": True,
+            "paddle_subscription_id": paddle_subscription_id,
+            "paddle_customer_id": paddle_customer_id,
+        },
+    )
+    return sub
+
+
+def cancel_paddle_subscription(paddle_subscription_id: str):
+    """Mark the subscription linked to this Paddle id as canceled."""
+    if not paddle_subscription_id:
+        return None
+    sub = Subscription.objects.filter(
+        paddle_subscription_id=paddle_subscription_id
+    ).first()
+    if sub is not None:
+        sub.status = SubscriptionStatus.CANCELED
+        sub.save(update_fields=["status", "updated_at"])
+    return sub
 
 
 def get_subscription(user):
@@ -143,6 +206,20 @@ def resolve_model(user):
     """LLM model for this user's plan, or None to use the global default."""
     plan = active_plan(user)
     return plan.llm_model if plan and plan.llm_model else None
+
+
+def can_sync_api_content(user) -> bool:
+    """May this tenant import knowledge from an external API (sync-api-content)?
+
+    Staff/admin: always. Paid plan: per the plan's ``allow_api_sync``. Free tier
+    (no active plan): per ``settings.FREE_TIER_ALLOW_API_SYNC`` (off by default).
+    """
+    if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+        return True
+    plan = active_plan(user)
+    if plan is not None:
+        return plan.allow_api_sync
+    return bool(getattr(settings, "FREE_TIER_ALLOW_API_SYNC", False))
 
 
 def plan_limits(user):

@@ -229,7 +229,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "users", "create", ""]
             },
-            "description": "Admin only. Alias of create user (same behavior, including the email verification code + email_verified: false)."
+            "description": "Admin only. Alias of create user (same behavior: account created inactive + activation link emailed, email_verified: false)."
           }
         },
         {
@@ -246,7 +246,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "users", "register", ""]
             },
-            "description": "Admin only. Alias of create user (same behavior, including the email verification code + email_verified: false)."
+            "description": "Admin only. Alias of create user (same behavior: account created inactive + activation link emailed, email_verified: false)."
           }
         },
         {
@@ -532,7 +532,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "chat", ""]
             },
-            "description": "`history` is optional (max CHAT_MAX_HISTORY_TURNS exchanges). `language` optional; blank = auto-detect."
+            "description": "`history` is optional (max CHAT_MAX_HISTORY_TURNS exchanges). `language` optional; blank = auto-detect. Costs CREDITS_PER_QUESTION credits (default 2), atomically reserved before answering — 402 when the balance can't cover it; auto-refunded if the answer fails (503)."
           }
         },
         {
@@ -722,7 +722,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "sync-api-content", ""]
             },
-            "description": "Fetch items from an external public API and ingest them into the RAG system. Only `api_url` is required. `document_name` default 'API Content', `items_key` default 'results'."
+            "description": "Fetch items from an external public API and ingest them into the RAG system. Only `api_url` is required. `document_name` default 'API Content', `items_key` default 'results'. NOT available on the free tier (returns 402 — the plan's `allow_api_sync` must be true; free tier is off by default)."
           }
         }
       ]
@@ -875,7 +875,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Pro\",\n  \"slug\": \"pro\",\n  \"description\": \"Professional tier\",\n  \"price_usd\": \"49.00\",\n  \"monthly_questions\": 5000,\n  \"monthly_token_cap\": 1000000,\n  \"included_credits\": 4000,\n  \"max_documents\": 100,\n  \"max_total_mb\": 500,\n  \"max_requests_per_min\": 60,\n  \"llm_model\": \"claude-haiku-4-5-20251001\",\n  \"is_active\": true,\n  \"sort_order\": 1\n}"
+              "raw": "{\n  \"name\": \"Pro\",\n  \"slug\": \"pro\",\n  \"description\": \"Professional tier\",\n  \"price_usd\": \"49.00\",\n  \"monthly_questions\": 5000,\n  \"monthly_token_cap\": 1000000,\n  \"included_credits\": 4000,\n  \"max_documents\": 100,\n  \"max_total_mb\": 500,\n  \"max_requests_per_min\": 60,\n  \"llm_model\": \"claude-haiku-4-5-20251001\",\n  \"allow_api_sync\": true,\n  \"paddle_price_id\": \"pri_...\",\n  \"is_active\": true,\n  \"sort_order\": 1\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/plans/",
@@ -904,13 +904,14 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"price_usd\": \"59.00\",\n  \"is_active\": true\n}"
+              "raw": "{\n  \"price_usd\": \"59.00\",\n  \"included_credits\": 4000,\n  \"allow_api_sync\": true,\n  \"paddle_price_id\": \"pri_...\",\n  \"is_active\": true\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/plans/{{plan_id}}/",
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "plans", "{{plan_id}}", ""]
-            }
+            },
+            "description": "Send only fields to change. Set `paddle_price_id` to link the plan to a Paddle price so payments fulfill to it; `included_credits` = credits granted on purchase; `allow_api_sync` toggles the sync-api-content feature."
           }
         },
         {
@@ -998,6 +999,27 @@
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "subscriptions", "{{subscription_id}}", ""]
             }
+          }
+        },
+        {
+          "name": "Paddle webhook (Paddle calls this)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Paddle-Signature", "value": "ts=...;h1=...", "description": "HMAC set by Paddle; verified server-side" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"evt_123\",\n  \"event_type\": \"transaction.completed\",\n  \"data\": {\n    \"id\": \"txn_123\",\n    \"custom_data\": { \"user_id\": \"{{user_id}}\" },\n    \"items\": [ { \"price\": { \"id\": \"pri_...\" } } ]\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/billing/paddle/webhook/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "billing", "paddle", "webhook", ""]
+            },
+            "description": "Public endpoint Paddle calls after a payment (you don't call it manually). Verifies the Paddle-Signature against PADDLE_WEBHOOK_SECRET, then: `transaction.completed` grants the matched plan's credits; `subscription.created/updated` sets the subscription; `subscription.canceled` cancels it. The plan is matched by `paddle_price_id`; the user by `custom_data.user_id` (passed at checkout). Idempotent per `event_id`. 403 on bad signature."
           }
         },
         {

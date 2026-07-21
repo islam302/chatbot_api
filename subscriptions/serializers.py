@@ -29,6 +29,8 @@ class PlanSerializer(serializers.ModelSerializer):
             "max_total_mb",
             "max_requests_per_min",
             "llm_model",
+            "allow_api_sync",
+            "paddle_price_id",
             "is_active",
             "sort_order",
         ]

@@ -53,6 +53,14 @@ class Plan(TimestampedModel):
     # Which LLM answers for tenants on this plan (per-plan model routing).
     llm_model = models.CharField(max_length=64, default="gpt-4o")
 
+    # Feature gate: may tenants on this plan import knowledge from an external API
+    # (the sync-api-content endpoint)? Off for the free tier.
+    allow_api_sync = models.BooleanField(default=True)
+
+    # Paddle price id (price_...) this plan maps to. A paid webhook is matched
+    # back to a Plan by this id.
+    paddle_price_id = models.CharField(max_length=64, blank=True, default="", db_index=True)
+
     is_active = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
 
@@ -87,6 +95,10 @@ class Subscription(TimestampedModel):
     current_period_start = models.DateTimeField(default=timezone.now)
     current_period_end = models.DateTimeField()
     auto_renew = models.BooleanField(default=True)
+
+    # Paddle linkage (blank for admin/manual subscriptions).
+    paddle_subscription_id = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    paddle_customer_id = models.CharField(max_length=64, blank=True, default="")
 
     class Meta:
         ordering = ["-created_at"]
@@ -123,3 +135,13 @@ class CreditWallet(TimestampedModel):
 
     def __str__(self):
         return f"{self.user} — {self.balance} credits"
+
+
+class PaddleWebhookEvent(TimestampedModel):
+    """Records processed Paddle event ids so a re-delivered webhook is a no-op."""
+
+    event_id = models.CharField(max_length=64, unique=True)
+    event_type = models.CharField(max_length=64, blank=True, default="")
+
+    def __str__(self):
+        return f"{self.event_type} {self.event_id}"

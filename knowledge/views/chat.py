@@ -55,11 +55,22 @@ class ChatAPIView(APIView):
         history = data.get("history") or []
         language = data.get("language") or detect_language(question)
 
-        # Per-tenant gate: suspension, rate limit, monthly token budget.
+        # Per-tenant gate: suspension, rate limit, monthly question/token budget,
+        # and a credit pre-check (friendly early 402).
         try:
             quota.check_chat_allowed(request.user)
         except quota.QuotaError as exc:
             return Response({"detail": exc.message}, status=exc.status_code)
+
+        # Airtight enforcement: ATOMICALLY reserve this question's credits BEFORE
+        # answering. Concurrent requests can't overspend — only as many as the
+        # balance covers get through; the rest get 402. Refunded if the answer
+        # fails, so a user is never charged for a reply they didn't receive.
+        if not quota.reserve_question_credits(request.user):
+            return Response(
+                {"detail": "You're out of credits. Upgrade your plan to keep asking questions."},
+                status=status.HTTP_402_PAYMENT_REQUIRED,
+            )
 
         started = time.monotonic()
         try:
@@ -74,10 +85,14 @@ class ChatAPIView(APIView):
             import logging
 
             logging.getLogger("knowledge").error("RAG unavailable: %s", exc)
+            quota.refund_question_credits(request.user)  # not the user's fault
             return Response(
                 {"detail": "The assistant is temporarily unavailable. Please try again."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
+        except Exception:
+            quota.refund_question_credits(request.user)  # never charge for a crash
+            raise
         elapsed = int((time.monotonic() - started) * 1000)
 
         # Meter the call for this tenant (tokens, cost, latency, confidence).
@@ -90,8 +105,6 @@ class ChatAPIView(APIView):
             confident=result.confident,
             chunk_count=len(result.sources),
         )
-        # Charge the tenant's credits for this answered question.
-        quota.charge_question(request.user)
 
         # Capture ONLY an in-domain question the bot couldn't answer from the data
         # ("gap") — the model classified it, so greetings/off-topic are excluded.

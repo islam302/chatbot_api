@@ -65,6 +65,12 @@ class DocumentUploadQuotaTests(APITestCase):
 class WordUploadTests(APITestCase):
     def setUp(self):
         self.user, self.key = make_tenant("alice")
+        # Normal (non free-tier) limits so multi-doc upload flows aren't capped.
+        from knowledge.models import TenantQuota
+
+        TenantQuota.objects.update_or_create(
+            user=self.user, defaults={"max_documents": 100, "max_total_mb": 200}
+        )
         self.url = reverse("document-upload-word")
 
     def test_missing_file_returns_400(self):

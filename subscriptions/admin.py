@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import CreditWallet, Plan, Subscription
+from .models import CreditWallet, PaddleWebhookEvent, Plan, Subscription
 
 
 @admin.register(Plan)
@@ -44,3 +44,10 @@ class CreditWalletAdmin(admin.ModelAdmin):
     search_fields = ("user__username",)
     raw_id_fields = ("user",)
     readonly_fields = ("id", "created_at", "updated_at")
+
+
+@admin.register(PaddleWebhookEvent)
+class PaddleWebhookEventAdmin(admin.ModelAdmin):
+    list_display = ("event_type", "event_id", "created_at")
+    search_fields = ("event_id", "event_type")
+    readonly_fields = ("event_id", "event_type", "created_at", "updated_at")

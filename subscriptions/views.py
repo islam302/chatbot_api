@@ -94,6 +94,37 @@ class SubscriptionViewSet(viewsets.ModelViewSet):
         return Response({"user": str(target.pk), "balance": credit_balance(target)})
 
 
+class PaddleWebhookView(APIView):
+    """Public endpoint Paddle calls after a payment. Verifies the signature, then
+    grants credits / sets the subscription. Never trusts an unsigned request."""
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes: list = []
+
+    @extend_schema(request=None, responses={200: None, 403: None})
+    def post(self, request):
+        import json
+        import logging
+
+        from .paddle import process_event, verify_signature
+
+        raw = request.body
+        signature = request.META.get("HTTP_PADDLE_SIGNATURE", "")
+        if not verify_signature(raw, signature):
+            return Response({"detail": "Invalid signature."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            payload = json.loads(raw.decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError):
+            return Response({"detail": "Invalid JSON."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            result = process_event(payload)
+        except Exception:
+            logging.getLogger(__name__).exception("Paddle webhook processing failed")
+            # 200 so Paddle doesn't hammer retries on a bug we've already logged.
+            return Response({"status": "error-logged"})
+        return Response({"status": result})
+
+
 class MySubscriptionView(APIView):
     """The caller's own subscription + live usage for the current period."""
 
