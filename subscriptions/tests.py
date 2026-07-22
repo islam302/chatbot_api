@@ -499,3 +499,48 @@ class MonthlyFreeRenewalTests(APITestCase):
         services.deduct_credits(self.user, 10_000)
         self._backdate_grant()
         self.assertEqual(services.credit_balance(self.user), 0)  # no free grant
+
+
+class PlanQuestionsAutoDeriveTests(APITestCase):
+    """Admins define a plan by `questions`; credits + token cap auto-derive."""
+
+    def setUp(self):
+        self.admin, self.admin_key = make_tenant("plan_admin", is_staff=True)
+
+    def _create(self, body):
+        return self.client.post(
+            reverse("plan-list"), body, format="json", HTTP_X_API_KEY=self.admin_key
+        )
+
+    def test_create_with_questions_derives_everything(self):
+        res = self._create({
+            "name": "Simple 500", "price_usd": "10.00", "questions": 500,
+            "max_documents": 10, "max_total_mb": 20,
+            "is_active": True, "allow_api_sync": False,
+        })
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.data["included_credits"], 1000)      # 500 * 2
+        self.assertEqual(res.data["monthly_token_cap"], 2_000_000)  # 500 * 4000
+        self.assertEqual(res.data["questions"], 500)              # echoed back
+        self.assertEqual(res.data["monthly_questions"], 0)        # credits gate
+
+    def test_update_questions_recomputes(self):
+        plan = make_plan(slug="resize", included_credits=1000)
+        res = self.client.patch(
+            reverse("plan-detail", args=[plan.id]),
+            {"questions": 2000}, format="json", HTTP_X_API_KEY=self.admin_key,
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["included_credits"], 4000)
+        self.assertEqual(res.data["monthly_token_cap"], 8_000_000)
+
+    def test_explicit_credits_still_work_without_questions(self):
+        res = self._create({"name": "Manual", "included_credits": 777})
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.data["included_credits"], 777)
+
+    def test_read_shows_questions(self):
+        make_plan(slug="readq", included_credits=1000)
+        res = self.client.get(reverse("plan-list"), HTTP_X_API_KEY=self.admin_key)
+        row = next(p for p in res.data["results"] if p["slug"] == "readq")
+        self.assertEqual(row["questions"], 500)

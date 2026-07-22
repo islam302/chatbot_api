@@ -319,6 +319,9 @@ EMBEDDING_PRICING = {
 # grant (once). Paid plans add Plan.included_credits on assignment.
 CREDITS_PER_QUESTION = int(os.getenv("CREDITS_PER_QUESTION", "2"))
 FREE_TIER_CREDITS = int(os.getenv("FREE_TIER_CREDITS", "100"))  # 100 / 2 = 50 questions
+# When a plan is defined by "questions", its token cap is auto-derived as
+# questions * this (a generous per-question ceiling; abuse safety net).
+PLAN_TOKENS_PER_QUESTION = int(os.getenv("PLAN_TOKENS_PER_QUESTION", "4000"))
 
 # --- Free tier limits -------------------------------------------------------
 # Applied to non-staff tenants with NO active paid plan (public free signups).

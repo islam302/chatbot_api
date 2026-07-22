@@ -541,9 +541,11 @@ Require an **admin** token. Highlights:
 
 **Plans & billing (admin):**
 - `GET /plans/` — anyone authenticated can list active plans (for a pricing page).
-  Admin `POST` / `PATCH` / `DELETE /plans/` manage them. Key fields: `price_usd`,
-  `included_credits`, `monthly_questions`, `max_documents`, `max_total_mb`,
-  `allow_api_sync`, `paddle_price_id`, `llm_model`.
+  Each plan includes a read-only `questions` (how many chat questions it sells) —
+  use that for the pricing display. Admin `POST` / `PATCH` / `DELETE /plans/`
+  manage them: just set `name`, `price_usd`, **`questions`**, `max_documents`,
+  `max_total_mb`, `is_active`, `allow_api_sync` (+ `paddle_price_id`) — credits
+  and the token cap are **auto-derived** from `questions`.
 - `POST /subscriptions/` — assign/move a user to a plan (`{ user, plan, duration_days }`).
 - `POST /subscriptions/add-credits/` — top up a wallet (`{ user, amount }`).
 - `GET /subscriptions/` — list all subscriptions.

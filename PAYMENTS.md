@@ -95,15 +95,20 @@ POST /api/v1/plans/
 {
   "name": "Pro",
   "price_usd": "49.00",
-  "included_credits": 4000,        // credits granted on each payment
-  "paddle_price_id": "pri_...",    // the Paddle price this maps to
-  "monthly_questions": 0,          // 0 = unlimited (credits are the real gate)
+  "questions": 2000,               // what you sell — everything derives from it
   "max_documents": 100,
   "max_total_mb": 500,
+  "is_active": true,
   "allow_api_sync": true,
-  "llm_model": "gpt-4o"
+  "paddle_price_id": "pri_..."     // the Paddle price this maps to
 }
 ```
+
+Setting `questions` auto-derives `included_credits` (= questions x
+`CREDITS_PER_QUESTION`) and `monthly_token_cap` (= questions x
+`PLAN_TOKENS_PER_QUESTION`, an abuse safety net). You only manage: name, price,
+questions, max docs, max storage, active, allow_api_sync. Advanced fields can
+still be set explicitly when `questions` is omitted.
 
 The **free tier needs no plan** — it's the default for signups. Optionally create
 a "Free" plan for display, but limits/credits already apply without it.
@@ -168,6 +173,11 @@ POST /api/v1/subscriptions/                  { "user": "<id>", "plan": "<id>", "
 
 ## 7. Testing (sandbox)
 
+> **Quick end-to-end test without a frontend:** open `paddle-checkout-test.html`
+> (in the repo root) in a browser — enter your sandbox client token, a price id,
+> and the test user's id, pay with the sandbox card `4242 4242 4242 4242`, then
+> watch the webhook logs and `GET /my-subscription/`.
+
 1. Keep `PADDLE_ENV=sandbox` and sandbox keys/secret in `.env`.
 2. In Paddle → your notification destination → **Simulate** an event (or use a
    sandbox test card in a real checkout). Paddle signs it, so it exercises the
@@ -219,6 +229,7 @@ Paddle sandbox test cards: use Paddle's documented sandbox card numbers.
 | `PADDLE_ENV` | `sandbox` | `sandbox` or `production`. |
 | `PADDLE_API_KEY` | — | Paddle server API key (outbound). |
 | `PADDLE_WEBHOOK_SECRET` | — | Verifies incoming webhooks (**required**). |
+| `PLAN_TOKENS_PER_QUESTION` | `4000` | Auto-derived token cap per plan question (abuse guard). |
 
 Per-plan: `included_credits`, `paddle_price_id`, `allow_api_sync`,
 `max_documents`, `max_total_mb`, `monthly_questions`, `price_usd`, `llm_model`.

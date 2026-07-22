@@ -13,6 +13,13 @@ User = get_user_model()
 class PlanSerializer(serializers.ModelSerializer):
     # Optional: auto-derived from `name` when omitted.
     slug = serializers.SlugField(required=False, allow_blank=True)
+    # The simple way to define a plan: how many chat questions it sells.
+    # Everything usage-related is derived from it automatically:
+    #   included_credits  = questions * CREDITS_PER_QUESTION
+    #   monthly_token_cap = questions * PLAN_TOKENS_PER_QUESTION (abuse guard)
+    # Explicit included_credits/monthly_token_cap in the same request are
+    # overridden by `questions`. Shown on read as included_credits / cost.
+    questions = serializers.IntegerField(required=False, min_value=1)
 
     class Meta:
         model = Plan
@@ -22,6 +29,7 @@ class PlanSerializer(serializers.ModelSerializer):
             "slug",
             "description",
             "price_usd",
+            "questions",
             "monthly_questions",
             "monthly_token_cap",
             "included_credits",
@@ -35,6 +43,34 @@ class PlanSerializer(serializers.ModelSerializer):
             "sort_order",
         ]
         read_only_fields = ["id"]
+        extra_kwargs = {
+            "monthly_questions": {"required": False},
+            "monthly_token_cap": {"required": False},
+            "included_credits": {"required": False},
+        }
+
+    def validate(self, attrs):
+        """`questions` drives the derived fields so admins only manage: name,
+        price, questions, max docs, max storage, active, allow_api_sync."""
+        questions = attrs.pop("questions", None)
+        if questions is not None:
+            from django.conf import settings
+
+            cpq = max(1, int(getattr(settings, "CREDITS_PER_QUESTION", 2)))
+            tpq = max(1, int(getattr(settings, "PLAN_TOKENS_PER_QUESTION", 4000)))
+            attrs["included_credits"] = questions * cpq
+            attrs["monthly_token_cap"] = questions * tpq
+            # Credits are the real gate; keep the legacy per-period counter off.
+            attrs.setdefault("monthly_questions", 0)
+        return attrs
+
+    def to_representation(self, instance):
+        from django.conf import settings
+
+        data = super().to_representation(instance)
+        cpq = max(1, int(getattr(settings, "CREDITS_PER_QUESTION", 2)))
+        data["questions"] = (instance.included_credits or 0) // cpq
+        return data
 
     def _unique_slug(self, validated_data, instance=None) -> str:
         """Use the provided slug, else slugify the name; guarantee uniqueness."""
