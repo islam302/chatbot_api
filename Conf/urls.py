@@ -22,10 +22,19 @@ def api_tester(_request):
     return FileResponse(open(html, "rb"), content_type="text/html")
 
 
+def paddle_test(_request):
+    """Serve the Paddle checkout test page (needs a real origin, not file://)."""
+    html = settings.BASE_DIR / "paddle-checkout-test.html"
+    if not html.exists():
+        raise Http404("paddle-checkout-test.html not found")
+    return FileResponse(open(html, "rb"), content_type="text/html")
+
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("health/", health, name="health"),
     path("api-tester/", api_tester, name="api-tester"),
+    path("paddle-test/", paddle_test, name="paddle-test"),
     # OpenAPI schema and docs
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),

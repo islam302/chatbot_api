@@ -173,10 +173,12 @@ POST /api/v1/subscriptions/                  { "user": "<id>", "plan": "<id>", "
 
 ## 7. Testing (sandbox)
 
-> **Quick end-to-end test without a frontend:** open `paddle-checkout-test.html`
-> (in the repo root) in a browser — enter your sandbox client token, a price id,
-> and the test user's id, pay with the sandbox card `4242 4242 4242 4242`, then
-> watch the webhook logs and `GET /my-subscription/`.
+> **Quick end-to-end test without a frontend:** open **`/paddle-test/`** on the
+> server (e.g. `http://127.0.0.1:8000/paddle-test/`) — it serves
+> `paddle-checkout-test.html` from a real origin (Paddle refuses `file://`).
+> Enter your sandbox client token, a price id, and the test user's id, pay with
+> the sandbox card `4242 4242 4242 4242`, then watch the webhook logs and
+> `GET /my-subscription/`.
 
 1. Keep `PADDLE_ENV=sandbox` and sandbox keys/secret in `.env`.
 2. In Paddle → your notification destination → **Simulate** an event (or use a

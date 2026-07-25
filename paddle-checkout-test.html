@@ -58,15 +58,22 @@ Sandbox test card: 4242 4242 4242 4242 — any future expiry, any CVC, any name.
         status.textContent = "token, price id and user id are all required.";
         return;
       }
+      if (location.protocol === "file:") {
+        status.textContent =
+          "WARNING: you opened this page as file:// — Paddle checkout usually refuses that.\n" +
+          "Serve it over localhost instead:\n" +
+          "  cd <project folder>\n  python -m http.server 8080\n" +
+          "then open http://localhost:8080/paddle-checkout-test.html";
+      }
       if (!initialized) {
         if (env === "sandbox") Paddle.Environment.set("sandbox");
         Paddle.Initialize({
           token: token,
           eventCallback: function (ev) {
-            status.textContent = "Paddle event: " + ev.name + "\n" +
-              (ev.name === "checkout.completed"
+            status.textContent = "Paddle event: " + (ev && ev.name) + "\n" +
+              ((ev && ev.name) === "checkout.completed"
                 ? "Payment done. Paddle will now call our webhook — check the destination logs, then GET /my-subscription/ for the new credits."
-                : JSON.stringify(ev.data || {}, null, 2).slice(0, 400));
+                : JSON.stringify(ev, null, 2).slice(0, 1500));
           },
         });
         initialized = true;
