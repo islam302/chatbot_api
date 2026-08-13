@@ -37,10 +37,15 @@ class AnswerQuestionTests(TestCase):
         # (using history) BEFORE it hits the vector search — otherwise retrieval
         # is blind. We capture the query search_chunks actually received.
         captured = {}
+        STANDALONE = "من كان المدير العام قبل أحمد القرني"
 
         class RewriteLLM(FakeLLM):
             def complete(self, system, user, *, temperature=0):
-                return "من كان المدير العام قبل أحمد القرني"
+                return STANDALONE  # the condensation step returns the rewrite
+
+            def complete_with_usage(self, system, user, *, temperature=0):
+                captured["answer_prompt"] = user  # the answer step's prompt
+                return super().complete_with_usage(system, user, temperature=temperature)
 
         def fake_search(question, *, top_k=None, threshold=None, user=None):
             captured["q"] = question
@@ -54,7 +59,10 @@ class AnswerQuestionTests(TestCase):
              mock.patch.object(rag, "get_backend", return_value=RewriteLLM()):
             answer_question("مين قبله", history=history, user=self.user)
         # Retrieval saw the rewritten query, not the bare "مين قبله".
-        self.assertEqual(captured["q"], "من كان المدير العام قبل أحمد القرني")
+        self.assertEqual(captured["q"], STANDALONE)
+        # And the ANSWER prompt was handed the resolved standalone question too,
+        # so the model doesn't hesitate on the bare pronoun form.
+        self.assertIn(STANDALONE, captured["answer_prompt"])
 
     def test_no_history_keeps_raw_query(self):
         captured = {}

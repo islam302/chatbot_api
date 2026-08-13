@@ -201,11 +201,24 @@ def answer_question(
     knowledge = "\n\n---\n\n".join(hit.content for hit in chunks)
     history_text = _render_history(list(history or []))
 
+    # If the latest message was a follow-up we rewrote into a standalone question
+    # (e.g. "مين قبله" -> "من كان المدير قبل اليامي"), show the model that explicit
+    # form too. The model reliably answers the explicit phrasing from the same
+    # chunks, but hesitates on the bare pronoun form — so hand it both.
+    resolved_line = ""
+    if retrieval_query and retrieval_query.strip() and retrieval_query.strip() != question.strip():
+        resolved_line = (
+            f"Resolved question (the customer's message, with references filled in "
+            f"from the conversation — answer THIS exact question if the fact is in "
+            f"\"What you know\"): {retrieval_query}\n\n"
+        )
+
     user_prompt = (
         f"Conversation so far (context ONLY — to understand what the customer refers to, "
         f"NOT a source of facts):\n{history_text or '(None)'}\n\n"
         f"What you know:\n{knowledge}\n\n"
         f"Customer's message: {question}\n\n"
+        f"{resolved_line}"
         f"Reply naturally as part of the team, following your rules. Answer directly — do NOT "
         f"open with a greeting (مرحبا/أهلاً/hello) or re-introduce yourself unless the customer's "
         f"message above is itself a greeting.\n"
