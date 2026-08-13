@@ -135,3 +135,41 @@ class ReindexTests(APITestCase):
         with mock.patch.object(docs_view, "dispatch_ingestion"):
             res = self.client.post(url, HTTP_X_API_KEY=other_key)
         self.assertEqual(res.status_code, 404)
+
+    def test_reindex_failure_returns_500(self):
+        url = reverse("document-reindex", args=[self.doc.id])
+        with mock.patch.object(docs_view, "dispatch_ingestion", side_effect=RuntimeError("boom")):
+            res = self.client.post(url, HTTP_X_API_KEY=self.key)
+        self.assertEqual(res.status_code, 500)
+
+
+class DocumentErrorBranchTests(APITestCase):
+    def setUp(self):
+        self.user, self.key = make_tenant("errs")
+        TenantQuota.objects.update_or_create(
+            user=self.user, defaults={"max_documents": 100, "max_total_mb": 100}
+        )
+
+    def test_create_swallows_ingestion_error_still_201(self):
+        # A failed background ingestion must not fail the upload itself.
+        with mock.patch.object(docs_view, "dispatch_ingestion", side_effect=RuntimeError("boom")):
+            res = self.client.post(
+                reverse("document-list"),
+                {"file": SimpleUploadedFile("a.txt", b"hello world", content_type="text/plain")},
+                format="multipart",
+                HTTP_X_API_KEY=self.key,
+            )
+        self.assertEqual(res.status_code, 201)
+
+    def test_word_upload_unexpected_error_returns_500(self):
+        with mock.patch.object(
+            docs_view, "import_document_from_word", side_effect=RuntimeError("parser exploded")
+        ):
+            res = self.client.post(
+                reverse("document-upload-word"),
+                {"file": SimpleUploadedFile("a.docx", b"PK\x03\x04stuff",
+                                            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+                format="multipart",
+                HTTP_X_API_KEY=self.key,
+            )
+        self.assertEqual(res.status_code, 500)

@@ -256,6 +256,38 @@ Re-running only re-embeds changed items (incremental).
 
 ---
 
+## 5b. Crawl a website into knowledge — `POST /crawl-website/`
+Give the tenant's own **website URL** and the bot learns the whole site: it
+discovers as many pages of the same site as it can (sitemap + internal links),
+extracts each page's main readable text (nav/menus/footers stripped), and stores
+them as knowledge. Great for onboarding — the client pastes their site instead of
+uploading files.
+```json
+// request
+{
+  "url": "https://client.com",   // required; bare host is upgraded to https://
+  "document_name": "Website: client.com",  // optional (defaults to the host)
+  "max_pages": 100,              // optional; clamped to the server cap (300)
+  "full_refresh": false          // optional; false = incremental re-crawl
+}
+```
+Crawling a whole site is slow, so it runs in the **background** and returns
+**`202`** immediately:
+```json
+{ "status": "processing", "document_id": "<uuid>", "document_name": "...", "max_pages": 100,
+  "detail": "Crawl started. Poll GET /documents/{id}/ for progress ..." }
+```
+Poll `GET /documents/{document_id}/` and watch `processing_status`:
+`processing` → `completed` (or `failed`, with `error_message`). The crawled pages
+become one knowledge document (source type `website`); re-crawling only re-embeds
+pages whose content changed. Same-site only, honours `robots.txt`, and rejects
+private/internal URLs (**`400`**).
+
+> **Not on the free tier.** Same gate as §5 — returns **`402`** unless the plan
+> enables it (`allow_api_sync`). Show an upgrade CTA on `402`.
+
+---
+
 ## 6. Bot configuration (optional) — `GET` / `PATCH /chatbot-config/`
 The bot works with **zero config** (it infers identity from the uploaded data).
 Use this only to customise its presentation.

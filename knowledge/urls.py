@@ -5,6 +5,7 @@ from .views import (
     ChatAPIView,
     ChatbotConfigView,
     ChatFeedbackAPIView,
+    CrawlWebsiteView,
     SyncAPIContentView,
     UnansweredQuestionViewSet,
     UploadedDocumentViewSet,
@@ -20,6 +21,7 @@ urlpatterns = [
     path("chat/feedback/", ChatFeedbackAPIView.as_view(), name="chat-feedback"),
     path("chatbot-config/", ChatbotConfigView.as_view(), name="chatbot-config"),
     path("sync-api-content/", SyncAPIContentView.as_view(), name="sync-api-content"),
+    path("crawl-website/", CrawlWebsiteView.as_view(), name="crawl-website"),
     path("analytics/usage/", UsageAnalyticsView.as_view(), name="analytics-usage"),
     path("", include(router.urls)),
 ]

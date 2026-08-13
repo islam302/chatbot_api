@@ -353,6 +353,13 @@ PADDLE_API_BASE = (
 #   "celery" - enqueue to a Celery worker (production; needs Redis + worker)
 INGESTION_MODE = os.getenv("INGESTION_MODE", "sync").lower()
 
+# --- Website crawl (import a client's whole site as knowledge) ----------------
+# Default pages to crawl per request, a hard server-side cap the request can't
+# exceed, and the per-page HTTP timeout (seconds).
+WEBSITE_CRAWL_MAX_PAGES = int(os.getenv("WEBSITE_CRAWL_MAX_PAGES", "100"))
+WEBSITE_CRAWL_MAX_PAGES_CAP = int(os.getenv("WEBSITE_CRAWL_MAX_PAGES_CAP", "300"))
+WEBSITE_CRAWL_TIMEOUT = int(os.getenv("WEBSITE_CRAWL_TIMEOUT", "15"))
+
 # How low-confidence chat questions are captured as knowledge gaps (same modes
 # as INGESTION_MODE). The capture runs an LLM filter, so "thread"/"celery" keep
 # it off the chat request path in production; "sync" keeps tests deterministic.

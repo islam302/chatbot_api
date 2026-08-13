@@ -724,6 +724,23 @@
             },
             "description": "Fetch items from an external public API and ingest them into the RAG system. Only `api_url` is required. `document_name` default 'API Content', `items_key` default 'results'. NOT available on the free tier (returns 402 — the plan's `allow_api_sync` must be true; free tier is off by default)."
           }
+        },
+        {
+          "name": "Crawl website into knowledge",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://client.com\",\n  \"document_name\": \"Website: client.com\",\n  \"max_pages\": 100,\n  \"full_refresh\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/crawl-website/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "crawl-website", ""]
+            },
+            "description": "Crawl a whole website and ingest every page as RAG knowledge. Only `url` is required (a bare host is upgraded to https://). Discovers same-site pages via sitemap + internal links, extracts each page's main text, honours robots.txt, and rejects private/internal URLs (400). Runs in the background: returns 202 with `document_id` — poll GET /documents/{id}/ and watch `processing_status` (processing -> completed/failed). `max_pages` is clamped to the server cap (300); `full_refresh` false = incremental re-crawl (only changed pages re-embedded). NOT available on the free tier (returns 402 — same `allow_api_sync` gate as Sync API Content)."
+          }
         }
       ]
     },

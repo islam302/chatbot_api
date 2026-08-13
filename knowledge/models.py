@@ -43,6 +43,7 @@ def upload_document_path(instance, filename):
 class SourceType(models.TextChoices):
     FILE = "file", "File Upload"
     API = "api", "API Sync"
+    WEBSITE = "website", "Website Crawl"
 
 
 class UploadedDocument(TimestampedModel):

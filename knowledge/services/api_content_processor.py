@@ -68,11 +68,12 @@ def _default_source_id(item: dict, content: str) -> str:
 class APIContentRAGProcessor:
     """Convert API content (articles, docs, rows, ...) to RAG-queryable chunks."""
 
-    def __init__(self, document_name: str = "API Content", user=None, api_url: str = "", items_key: str = "results"):
+    def __init__(self, document_name: str = "API Content", user=None, api_url: str = "", items_key: str = "results", source_type: str = SourceType.API):
         self.document_name = document_name
         self.user = user
         self.api_url = api_url
         self.items_key = items_key
+        self.source_type = source_type
         self._ensure_api_document()
 
     def _ensure_api_document(self):
@@ -84,7 +85,7 @@ class APIContentRAGProcessor:
         defaults = {
             "file_size": 0,
             "processing_status": DocumentStatus.COMPLETED,
-            "source_type": SourceType.API,
+            "source_type": self.source_type,
             "api_url": self.api_url,
             "items_key": self.items_key,
         }
@@ -98,7 +99,7 @@ class APIContentRAGProcessor:
         self.api_document = doc
 
         if not created and self.api_url:
-            doc.source_type = SourceType.API
+            doc.source_type = self.source_type
             doc.api_url = self.api_url
             doc.items_key = self.items_key
             doc.save()

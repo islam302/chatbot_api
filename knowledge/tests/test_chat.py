@@ -92,6 +92,26 @@ class ChatEndpointTests(APITestCase):
         self.assertEqual(res.status_code, 503)
         self.assertEqual(credit_balance(self.user), start)  # reserved then refunded
 
+    def test_unexpected_error_refunds_and_propagates_500(self):
+        # A non-RagUnavailable crash must refund the reserved credits and 500.
+        from subscriptions.services import credit_balance
+
+        start = credit_balance(self.user)
+        self.client.raise_request_exception = False  # observe the 500 instead of re-raising
+        with mock.patch.object(chat_view, "answer_question", side_effect=ValueError("boom")):
+            res = self._post({"question": "hi"}, key=self.key)
+        self.assertEqual(res.status_code, 500)
+        self.assertEqual(credit_balance(self.user), start)  # reserved then refunded
+
+    def test_atomic_reserve_race_loss_returns_402(self):
+        # Pre-check passes (has credits) but the atomic reserve loses the race
+        # (a concurrent request spent them first) -> 402, LLM never runs.
+        with mock.patch.object(chat_view.quota, "reserve_question_credits", return_value=False), \
+             mock.patch.object(chat_view, "answer_question", return_value=_fake_answer()) as aq:
+            res = self._post({"question": "hi"}, key=self.key)
+        self.assertEqual(res.status_code, 402)
+        aq.assert_not_called()
+
     def test_rate_limit_returns_429(self):
         TenantQuota.objects.update_or_create(
             user=self.user, defaults={"max_requests_per_min": 1}
@@ -142,3 +162,32 @@ class DetectLanguageTests(APITestCase):
 
     def test_empty_falls_back_without_error(self):
         self.assertIsInstance(chat_view.detect_language(""), str)
+
+
+class ChatFeedbackTests(APITestCase):
+    def setUp(self):
+        self.user, self.key = make_tenant("fb_user")
+        self.url = reverse("chat-feedback")
+
+    def _post(self, body, key=None):
+        return self.client.post(
+            self.url, body, format="json",
+            **({"HTTP_X_API_KEY": key} if key else {}),
+        )
+
+    def test_requires_auth(self):
+        self.assertEqual(self._post({"question": "q", "answer": "a", "rating": "up"}).status_code, 401)
+
+    def test_records_feedback(self):
+        res = self._post(
+            {"question": "do you ship?", "answer": "yes", "rating": "up", "comment": "great"},
+            key=self.key,
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.data["rating"], "up")
+        # Scoped to the caller.
+        self.assertEqual(str(res.data["user"]), str(self.user.pk))
+
+    def test_invalid_rating_rejected(self):
+        res = self._post({"question": "q", "answer": "a", "rating": "meh"}, key=self.key)
+        self.assertEqual(res.status_code, 400)

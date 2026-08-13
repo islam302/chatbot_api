@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from unittest import mock
 
 from django.urls import reverse
 from django.utils import timezone
@@ -455,6 +456,93 @@ class AdminCreditExemptionTests(APITestCase):
         before = services.credit_balance(user)  # free grant
         self.assertTrue(services.spend_credits(user))
         self.assertEqual(services.credit_balance(user), before - 2)
+
+
+class AddCreditsValidationTests(APITestCase):
+    """POST /subscriptions/add-credits/ input validation branches (admin only)."""
+
+    def setUp(self):
+        self.admin, self.admin_key = make_tenant("credits_boss", is_staff=True)
+        self.user, _ = make_tenant("credits_target")
+        self.url = reverse("subscription-add-credits")
+
+    def _post(self, body):
+        return self.client.post(self.url, body, format="json", HTTP_X_API_KEY=self.admin_key)
+
+    def test_non_admin_forbidden(self):
+        _u, key = make_tenant("not_admin")
+        res = self.client.post(self.url, {"user": str(self.user.pk), "amount": 10},
+                               format="json", HTTP_X_API_KEY=key)
+        self.assertEqual(res.status_code, 403)
+
+    def test_non_integer_amount_returns_400(self):
+        self.assertEqual(self._post({"user": str(self.user.pk), "amount": "lots"}).status_code, 400)
+
+    def test_non_positive_amount_returns_400(self):
+        self.assertEqual(self._post({"user": str(self.user.pk), "amount": 0}).status_code, 400)
+
+    def test_unknown_user_returns_404(self):
+        res = self._post({"user": "00000000-0000-0000-0000-000000000000", "amount": 10})
+        self.assertEqual(res.status_code, 404)
+
+
+@override_settings(PADDLE_WEBHOOK_SECRET=_WH_SECRET)
+class PaddleWebhookEdgeTests(APITestCase):
+    """Signature-verified but malformed / failing payloads."""
+
+    def setUp(self):
+        self.url = reverse("paddle-webhook")
+
+    def test_invalid_json_body_returns_400(self):
+        raw = b"{not valid json"
+        sig = _sign(raw)
+        res = self.client.post(self.url, data=raw, content_type="application/json",
+                               HTTP_PADDLE_SIGNATURE=sig)
+        self.assertEqual(res.status_code, 400)
+
+    def test_processing_error_is_logged_and_200(self):
+        import json as _json
+
+        payload = {"event_id": "evt_boom", "event_type": "transaction.completed", "data": {}}
+        raw = _json.dumps(payload).encode()
+        sig = _sign(raw)
+        with mock.patch("subscriptions.paddle.process_event", side_effect=RuntimeError("kaboom")):
+            res = self.client.post(self.url, data=raw, content_type="application/json",
+                                   HTTP_PADDLE_SIGNATURE=sig)
+        # 200 so Paddle doesn't hammer retries on a bug we've already logged.
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["status"], "error-logged")
+
+
+class PlanVisibilityTests(APITestCase):
+    """Non-admins see only active plans; admins see all and can write."""
+
+    def setUp(self):
+        self.user, self.key = make_tenant("browser")
+        self.admin, self.admin_key = make_tenant("plan_boss", is_staff=True)
+        make_plan(slug="live", is_active=True)
+        make_plan(slug="hidden", is_active=False)
+
+    @staticmethod
+    def _slugs(res):
+        rows = res.data["results"] if isinstance(res.data, dict) and "results" in res.data else res.data
+        return {p["slug"] for p in rows}
+
+    def test_non_admin_sees_only_active(self):
+        res = self.client.get(reverse("plan-list"), HTTP_X_API_KEY=self.key)
+        self.assertEqual(res.status_code, 200)
+        slugs = self._slugs(res)
+        self.assertIn("live", slugs)
+        self.assertNotIn("hidden", slugs)
+
+    def test_admin_sees_all(self):
+        res = self.client.get(reverse("plan-list"), HTTP_X_API_KEY=self.admin_key)
+        self.assertIn("hidden", self._slugs(res))
+
+    def test_non_admin_cannot_create_plan(self):
+        res = self.client.post(reverse("plan-list"), {"name": "X", "slug": "x", "questions": 10},
+                               format="json", HTTP_X_API_KEY=self.key)
+        self.assertEqual(res.status_code, 403)
 
 
 class MonthlyFreeRenewalTests(APITestCase):

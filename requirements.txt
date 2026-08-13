@@ -34,6 +34,10 @@ anthropic>=0.39,<1.0
 # Document parsing
 docx2txt>=0.9,<1.0
 
+# Website crawling: main-content extraction (best-in-class) + HTML link parsing
+trafilatura>=1.12,<2.0
+beautifulsoup4>=4.12,<5.0
+
 # Language detection
 langdetect>=1.0,<2.0
 
