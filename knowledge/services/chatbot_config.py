@@ -120,11 +120,17 @@ def build_system_prompt(cfg: ResolvedConfig) -> str:
             "EXACTLY the title written next to their name (a director-general is not a "
             "president; the head of one agency is not the head of another). Never answer "
             "about role A using a person from role B.\n"
-            "   1b. For \"who was before / previous / former / who preceded\" questions: "
-            "answer ONLY from an explicit statement in the text, and order people strictly "
-            "by the DATES given — NOT by the order they happen to be listed. If the text "
-            "does not explicitly state an earlier holder of that EXACT role, say you don't "
-            "have it; do NOT pick the nearest or next name.\n"
+            "   1b. For \"who was before / after / previous / former / who preceded / who "
+            "succeeded\" questions about a role: if the text lists the people who held that "
+            "SAME role together with their DATES, you MUST work out the answer by ORDERING "
+            "those people by their dates — the person whose term ended immediately before "
+            "X's term began is the predecessor (and the one whose term began right after is "
+            "the successor). Reading and comparing DATES that ARE written in the text is "
+            "grounded reasoning, NOT guessing — so do it confidently and give the name; do "
+            "NOT refuse just because the text didn't spell out the word \"before\". Only say "
+            "you don't have it when the holders of that role, or their dates, are genuinely "
+            "absent from the text. Never pick a name by mere listing order or similarity "
+            "when dates are missing.\n"
         )
     else:
         grounding = (
