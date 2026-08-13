@@ -536,6 +536,26 @@
           }
         },
         {
+          "name": "Chat (follow-up — query rewriting test)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-API-Key", "value": "{{api_key}}", "description": "Alternative to Bearer JWT", "disabled": true }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"مين قبله\",\n  \"history\": [\n    { \"role\": \"user\", \"content\": \"السلام عليكم\" },\n    { \"role\": \"assistant\", \"content\": \"وعليكم السلام! كيف أقدر أساعدك؟\" },\n    { \"role\": \"user\", \"content\": \"مين المدير العام الحالي لليونا؟\" },\n    { \"role\": \"assistant\", \"content\": \"سعادة الأستاذ محمد بن عبد ربه اليامي.\" },\n    { \"role\": \"user\", \"content\": \"ومين كان قبله؟\" },\n    { \"role\": \"assistant\", \"content\": \"الأستاذ أحمد بن عبد الله القرني، من 1 يوليو 2020 إلى 1 يوليو 2021.\" }\n  ],\n  \"language\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "chat", ""]
+            },
+            "description": "Tests history-aware query rewriting. The bare follow-up 'مين قبله' carries no retrievable signal on its own; using the history the server rewrites it to a standalone query (e.g. 'من كان المدير العام قبل أحمد القرني') BEFORE retrieval, so it finds the right passage. Send the last few turns as `history` (the frontend sends the last 3). Expected: it names the predecessor from the knowledge base instead of 'I don't have that'."
+          }
+        },
+        {
           "name": "Chat feedback",
           "request": {
             "method": "POST",

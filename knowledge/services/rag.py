@@ -127,12 +127,20 @@ def answer_question(
     # Tenant isolation guard: retrieval is ALWAYS scoped to one tenant. Without
     # an authenticated user we must never search the shared chunk table (that
     # would leak other tenants' data), so we skip retrieval entirely.
+    retrieval_query = question
     if user is None or not getattr(user, "is_authenticated", False):
         chunks = []
     else:
+        # Follow-ups ("مين قبله") carry no retrievable signal alone → rewrite them
+        # into a standalone query using the conversation before searching.
+        if history:
+            try:
+                retrieval_query = condense_query(question, history, get_backend(llm_model))
+            except Exception:
+                retrieval_query = question
         try:
             chunks = search_chunks(
-                question,
+                retrieval_query,
                 top_k=resolve_top_k(cfg),
                 threshold=threshold,
                 user=user,
@@ -151,7 +159,7 @@ def answer_question(
         # The grounded prompt keeps it honest: it declines if truly off-topic.
         try:
             chunks = search_chunks(
-                question, top_k=resolve_top_k(cfg), threshold=0.0, user=user
+                retrieval_query, top_k=resolve_top_k(cfg), threshold=0.0, user=user
             )
         except Exception:
             chunks = []
@@ -325,3 +333,45 @@ def _render_history(history: list[dict]) -> str:
         label = "User" if role == "user" else "Assistant"
         out.append(f"{label}: {content}")
     return "\n".join(out)
+
+
+_CONDENSE_SYSTEM = (
+    "You rewrite the user's latest message into ONE standalone search query for a "
+    "knowledge base. Resolve every reference from the conversation: pronouns "
+    "(him/her/it/هو/هي), and relative references (before that / the previous one / "
+    "after him / مين قبله / اللي قبله / بعده). Make the entities EXPLICIT — if the "
+    "conversation was about a role and a specific person, name both the role and "
+    "the person in the query (e.g. 'من كان المدير العام قبل أحمد القرني'). Keep the "
+    "user's language. Output ONLY the rewritten query — no quotes, no explanation, "
+    "no preamble."
+)
+
+
+def condense_query(question: str, history, llm) -> str:
+    """Rewrite a follow-up into a standalone retrieval query using the history.
+
+    A bare follow-up like "مين قبله" carries no retrievable signal on its own, so
+    retrieval misses the relevant chunk. Rewriting it to an explicit, standalone
+    query (resolving "him"/"before that" from the conversation) is what lets the
+    vector search actually find the right passage. Returns the original question
+    unchanged when there's no history or on any failure (never blocks a reply).
+    """
+    hist = list(history or [])
+    if not hist:
+        return question
+    convo = _render_history(hist)
+    if not convo:
+        return question
+    user_prompt = (
+        f"Conversation:\n{convo}\n\nLatest message: {question}\n\nStandalone query:"
+    )
+    try:
+        rewritten = (llm.complete(_CONDENSE_SYSTEM, user_prompt) or "").strip()
+    except Exception:
+        logger.exception("Query condensation failed; using the raw question")
+        return question
+    # Strip accidental wrapping quotes; guard against an empty or runaway rewrite.
+    rewritten = rewritten.strip().strip('"').strip("'").strip()
+    if not rewritten or len(rewritten) > 400:
+        return question
+    return rewritten

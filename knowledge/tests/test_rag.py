@@ -32,6 +32,42 @@ class AnswerQuestionTests(TestCase):
              mock.patch.object(rag, "get_backend", return_value=llm):
             return answer_question("ما هي الخدمة؟", user=self.user)
 
+    def test_followup_query_is_condensed_before_retrieval(self):
+        # A bare follow-up ("مين قبله") must be rewritten into a standalone query
+        # (using history) BEFORE it hits the vector search — otherwise retrieval
+        # is blind. We capture the query search_chunks actually received.
+        captured = {}
+
+        class RewriteLLM(FakeLLM):
+            def complete(self, system, user, *, temperature=0):
+                return "من كان المدير العام قبل أحمد القرني"
+
+        def fake_search(question, *, top_k=None, threshold=None, user=None):
+            captured["q"] = question
+            return [make_hit("عيسى خيره روبله 2017-2019")]
+
+        history = [
+            {"role": "user", "content": "مين المدير قبل اليامي"},
+            {"role": "assistant", "content": "أحمد القرني 2020-2021"},
+        ]
+        with mock.patch.object(rag, "search_chunks", side_effect=fake_search), \
+             mock.patch.object(rag, "get_backend", return_value=RewriteLLM()):
+            answer_question("مين قبله", history=history, user=self.user)
+        # Retrieval saw the rewritten query, not the bare "مين قبله".
+        self.assertEqual(captured["q"], "من كان المدير العام قبل أحمد القرني")
+
+    def test_no_history_keeps_raw_query(self):
+        captured = {}
+
+        def fake_search(question, *, top_k=None, threshold=None, user=None):
+            captured["q"] = question
+            return [make_hit("x")]
+
+        with mock.patch.object(rag, "search_chunks", side_effect=fake_search), \
+             mock.patch.object(rag, "get_backend", return_value=FakeLLM()):
+            answer_question("ما هي الخدمة؟", user=self.user)
+        self.assertEqual(captured["q"], "ما هي الخدمة؟")  # no rewrite without history
+
     def test_confident_when_strict_hits(self):
         res = self._run(hits=[make_hit("we sell software")])
         self.assertTrue(res.confident)
