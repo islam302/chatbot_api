@@ -569,6 +569,10 @@ Require an **admin** token. Highlights:
 - `GET /users/` — list tenants (each includes its `api_key`).
 - `POST /users/{id}/regenerate-api-key/` — rotate a user's key (admin only; users can't rotate their own).
 - `POST /users/{id}/set-password/` — admin resets a user's password.
+- `PATCH /users/{id}/` — update a tenant. Deactivating (`is_active: false`) a
+  normal user works; deactivating a **staff/admin** account is refused (**`400`**,
+  "Admin/staff accounts cannot be deactivated") so an admin can't lock themselves
+  out. (Recovery if it ever happens on the server: `python manage.py reactivate_admin`.)
 - `GET /api-keys/`, `POST /api-keys/{id}/revoke|activate|regenerate/` — key control.
 
 **Plans & billing (admin):**

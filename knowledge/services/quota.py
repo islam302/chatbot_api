@@ -221,10 +221,13 @@ def check_document_quota(user, incoming_bytes: int) -> None:
 
 def _check_subscription_active(user) -> None:
     """If the user HAS a subscription that lapsed, block them. No subscription at
-    all = allowed (free tier on default limits)."""
+    all = allowed (free tier on default limits). Staff/superusers are exempt —
+    their usage is internal testing and is never blocked."""
     try:
-        from subscriptions.services import subscription_state
+        from subscriptions.services import is_credit_exempt, subscription_state
     except Exception:
+        return
+    if is_credit_exempt(user):
         return
     if subscription_state(user) == "inactive":
         raise SubscriptionInactive(

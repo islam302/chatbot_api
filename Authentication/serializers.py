@@ -48,6 +48,19 @@ class UserSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "role", "api_key", "email_verified", "date_joined"]
 
+    def validate_is_active(self, value):
+        """Admin/staff accounts can never be deactivated — that would lock the
+        owner out of the whole system (no login, no API key). Guards the admin
+        PATCH /users/{id}/ path against an accidental self-lockout."""
+        if value is False and self.instance and (
+            getattr(self.instance, "is_staff", False)
+            or getattr(self.instance, "is_superuser", False)
+        ):
+            raise serializers.ValidationError(
+                "Admin/staff accounts cannot be deactivated."
+            )
+        return value
+
     def get_role(self, obj):
         return "admin" if obj.is_staff else "user"
 

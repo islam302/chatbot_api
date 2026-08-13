@@ -11,6 +11,36 @@ from knowledge.services import quota
 from .factories import make_document, make_tenant
 
 
+class ExpiredSubscriptionTests(TestCase):
+    """A lapsed subscription blocks normal users but never staff (exempt)."""
+
+    def _expire(self, user):
+        from datetime import timedelta
+
+        from subscriptions.models import Subscription, SubscriptionStatus
+        from subscriptions.tests import make_plan
+
+        now = timezone.now()
+        Subscription.objects.create(
+            user=user, plan=make_plan(slug=f"p_{user.username}"),
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=now - timedelta(days=60),
+            current_period_end=now - timedelta(days=30),  # ended → inactive
+        )
+
+    def test_expired_subscription_blocks_normal_user(self):
+        user, _ = make_tenant("lapsed")
+        self._expire(user)
+        with self.assertRaises(quota.SubscriptionInactive) as ctx:
+            quota.check_chat_allowed(user)
+        self.assertEqual(ctx.exception.status_code, 402)
+
+    def test_expired_subscription_does_not_block_admin(self):
+        admin, _ = make_tenant("lapsed_admin", is_staff=True)
+        self._expire(admin)
+        quota.check_chat_allowed(admin)  # exempt → no raise
+
+
 class DocumentQuotaTests(TestCase):
     def setUp(self):
         self.user, _ = make_tenant("alice")

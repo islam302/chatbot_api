@@ -133,6 +133,56 @@ class AdminPasswordAndKeyTests(APITestCase):
         self.assertNotEqual(self.target.api_key.key, old)
 
 
+class DeactivationGuardTests(APITestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="admin", password="x", is_staff=True, is_superuser=True
+        )
+        self.client.force_authenticate(self.admin)
+
+    def test_admin_cannot_deactivate_own_account(self):
+        res = self.client.patch(
+            reverse("user-detail", args=[self.admin.pk]), {"is_active": False}, format="json"
+        )
+        self.assertEqual(res.status_code, 400)
+        self.admin.refresh_from_db()
+        self.assertTrue(self.admin.is_active)
+
+    def test_admin_cannot_deactivate_another_staff(self):
+        staff = User.objects.create_user(username="staff2", password="x", is_staff=True)
+        res = self.client.patch(
+            reverse("user-detail", args=[staff.pk]), {"is_active": False}, format="json"
+        )
+        self.assertEqual(res.status_code, 400)
+
+    def test_normal_user_can_still_be_deactivated(self):
+        normal = User.objects.create_user(username="normal", password="x")
+        res = self.client.patch(
+            reverse("user-detail", args=[normal.pk]), {"is_active": False}, format="json"
+        )
+        self.assertEqual(res.status_code, 200)
+        normal.refresh_from_db()
+        self.assertFalse(normal.is_active)
+
+
+class ReactivateAdminCommandTests(APITestCase):
+    def test_command_reactivates_locked_superuser(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        u = User.objects.create_user(
+            username="locked", password="x", is_staff=True, is_superuser=True
+        )
+        u.is_active = False
+        u.save(update_fields=["is_active"])
+
+        call_command("reactivate_admin", username="locked", stdout=StringIO())
+        u.refresh_from_db()
+        self.assertTrue(u.is_active)
+        self.assertTrue(u.is_superuser)
+
+
 class RequestPasswordCodeErrorTests(APITestCase):
     def test_no_email_user_gets_400(self):
         # start_password_change raises when the user has no email to send to.
