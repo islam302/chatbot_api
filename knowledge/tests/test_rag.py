@@ -32,37 +32,26 @@ class AnswerQuestionTests(TestCase):
              mock.patch.object(rag, "get_backend", return_value=llm):
             return answer_question("ما هي الخدمة؟", user=self.user)
 
-    def test_followup_query_is_condensed_before_retrieval(self):
-        # A bare follow-up ("مين قبله") must be rewritten into a standalone query
-        # (using history) BEFORE it hits the vector search — otherwise retrieval
-        # is blind. We capture the query search_chunks actually received.
+    def test_followup_retrieval_query_is_context_augmented(self):
+        # A bare follow-up ("مين قبله") gets recent conversation context prepended
+        # DETERMINISTICALLY (no LLM) so retrieval has the referent — while the
+        # original words stay intact (never weakening a query that already worked).
         captured = {}
-        STANDALONE = "من كان المدير العام قبل أحمد القرني"
-
-        class RewriteLLM(FakeLLM):
-            def complete(self, system, user, *, temperature=0):
-                return STANDALONE  # the condensation step returns the rewrite
-
-            def complete_with_usage(self, system, user, *, temperature=0):
-                captured["answer_prompt"] = user  # the answer step's prompt
-                return super().complete_with_usage(system, user, temperature=temperature)
 
         def fake_search(question, *, top_k=None, threshold=None, user=None):
             captured["q"] = question
             return [make_hit("عيسى خيره روبله 2017-2019")]
 
         history = [
-            {"role": "user", "content": "مين المدير قبل اليامي"},
-            {"role": "assistant", "content": "أحمد القرني 2020-2021"},
+            {"role": "user", "content": "مين المدير الحالي"},
+            {"role": "assistant", "content": "محمد بن عبد ربه اليامي"},
         ]
         with mock.patch.object(rag, "search_chunks", side_effect=fake_search), \
-             mock.patch.object(rag, "get_backend", return_value=RewriteLLM()):
+             mock.patch.object(rag, "get_backend", return_value=FakeLLM()):
             answer_question("مين قبله", history=history, user=self.user)
-        # Retrieval saw the rewritten query, not the bare "مين قبله".
-        self.assertEqual(captured["q"], STANDALONE)
-        # And the ANSWER prompt was handed the resolved standalone question too,
-        # so the model doesn't hesitate on the bare pronoun form.
-        self.assertIn(STANDALONE, captured["answer_prompt"])
+        # The referent from history ("اليامي") AND the original words are present.
+        self.assertIn("اليامي", captured["q"])
+        self.assertIn("مين قبله", captured["q"])
 
     def test_no_history_keeps_raw_query(self):
         captured = {}
@@ -74,7 +63,22 @@ class AnswerQuestionTests(TestCase):
         with mock.patch.object(rag, "search_chunks", side_effect=fake_search), \
              mock.patch.object(rag, "get_backend", return_value=FakeLLM()):
             answer_question("ما هي الخدمة؟", user=self.user)
-        self.assertEqual(captured["q"], "ما هي الخدمة؟")  # no rewrite without history
+        self.assertEqual(captured["q"], "ما هي الخدمة؟")  # unchanged without history
+
+    def test_strong_query_terms_are_preserved_with_history(self):
+        # Regression guard: the explicit "مين قبل اليامي" must keep its exact words
+        # in the retrieval query (the old LLM-rewrite corrupted them → 0.08 scores).
+        captured = {}
+
+        def fake_search(question, *, top_k=None, threshold=None, user=None):
+            captured["q"] = question
+            return [make_hit("x")]
+
+        history = [{"role": "assistant", "content": "محمد بن عبد ربه اليامي"}]
+        with mock.patch.object(rag, "search_chunks", side_effect=fake_search), \
+             mock.patch.object(rag, "get_backend", return_value=FakeLLM()):
+            answer_question("مين قبل اليامي", history=history, user=self.user)
+        self.assertIn("مين قبل اليامي", captured["q"])
 
     def test_confident_when_strict_hits(self):
         res = self._run(hits=[make_hit("we sell software")])

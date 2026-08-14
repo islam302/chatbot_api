@@ -131,13 +131,10 @@ def answer_question(
     if user is None or not getattr(user, "is_authenticated", False):
         chunks = []
     else:
-        # Follow-ups ("مين قبله") carry no retrievable signal alone → rewrite them
-        # into a standalone query using the conversation before searching.
+        # Follow-ups ("مين قبله") carry no retrievable signal alone → enrich the
+        # search query with recent conversation context (deterministic, no LLM).
         if history:
-            try:
-                retrieval_query = condense_query(question, history, get_backend(llm_model))
-            except Exception:
-                retrieval_query = question
+            retrieval_query = build_retrieval_query(question, history)
         try:
             chunks = search_chunks(
                 retrieval_query,
@@ -201,24 +198,11 @@ def answer_question(
     knowledge = "\n\n---\n\n".join(hit.content for hit in chunks)
     history_text = _render_history(list(history or []))
 
-    # If the latest message was a follow-up we rewrote into a standalone question
-    # (e.g. "مين قبله" -> "من كان المدير قبل اليامي"), show the model that explicit
-    # form too. The model reliably answers the explicit phrasing from the same
-    # chunks, but hesitates on the bare pronoun form — so hand it both.
-    resolved_line = ""
-    if retrieval_query and retrieval_query.strip() and retrieval_query.strip() != question.strip():
-        resolved_line = (
-            f"Resolved question (the customer's message, with references filled in "
-            f"from the conversation — answer THIS exact question if the fact is in "
-            f"\"What you know\"): {retrieval_query}\n\n"
-        )
-
     user_prompt = (
         f"Conversation so far (context ONLY — to understand what the customer refers to, "
         f"NOT a source of facts):\n{history_text or '(None)'}\n\n"
         f"What you know:\n{knowledge}\n\n"
         f"Customer's message: {question}\n\n"
-        f"{resolved_line}"
         f"Reply naturally as part of the team, following your rules. Answer directly — do NOT "
         f"open with a greeting (مرحبا/أهلاً/hello) or re-introduce yourself unless the customer's "
         f"message above is itself a greeting.\n"
@@ -351,43 +335,25 @@ def _render_history(history: list[dict]) -> str:
     return "\n".join(out)
 
 
-_CONDENSE_SYSTEM = (
-    "You rewrite the user's latest message into ONE standalone search query for a "
-    "knowledge base. Resolve every reference from the conversation: pronouns "
-    "(him/her/it/هو/هي), and relative references (before that / the previous one / "
-    "after him / مين قبله / اللي قبله / بعده). Make the entities EXPLICIT — if the "
-    "conversation was about a role and a specific person, name both the role and "
-    "the person in the query (e.g. 'من كان المدير العام قبل أحمد القرني'). Keep the "
-    "user's language. Output ONLY the rewritten query — no quotes, no explanation, "
-    "no preamble."
-)
+def build_retrieval_query(question: str, history) -> str:
+    """Enrich a bare follow-up ("مين قبله") with recent conversation context so
+    the vector search has something to match — DETERMINISTICALLY.
 
-
-def condense_query(question: str, history, llm) -> str:
-    """Rewrite a follow-up into a standalone retrieval query using the history.
-
-    A bare follow-up like "مين قبله" carries no retrievable signal on its own, so
-    retrieval misses the relevant chunk. Rewriting it to an explicit, standalone
-    query (resolving "him"/"before that" from the conversation) is what lets the
-    vector search actually find the right passage. Returns the original question
-    unchanged when there's no history or on any failure (never blocks a reply).
+    We append the last couple of conversation turns (the entities the follow-up
+    refers to, e.g. "...اليامي") in FRONT of the original question, keeping the
+    user's exact words at the end. No LLM is involved, so it can never invent a
+    wrong entity (an earlier LLM-rewrite approach hallucinated names like turning
+    "اليامي" into "Mohammed bin Salman", which destroyed retrieval). The original
+    question terms are preserved, so a query that already retrieved well is not
+    weakened. Returns the plain question when there's no history.
     """
     hist = list(history or [])
     if not hist:
         return question
-    convo = _render_history(hist)
-    if not convo:
+    # Last two non-empty turns carry the referent (the person/role in play).
+    recent = [(m.get("content") or "").strip() for m in hist[-2:]]
+    recent = [c for c in recent if c]
+    if not recent:
         return question
-    user_prompt = (
-        f"Conversation:\n{convo}\n\nLatest message: {question}\n\nStandalone query:"
-    )
-    try:
-        rewritten = (llm.complete(_CONDENSE_SYSTEM, user_prompt) or "").strip()
-    except Exception:
-        logger.exception("Query condensation failed; using the raw question")
-        return question
-    # Strip accidental wrapping quotes; guard against an empty or runaway rewrite.
-    rewritten = rewritten.strip().strip('"').strip("'").strip()
-    if not rewritten or len(rewritten) > 400:
-        return question
-    return rewritten
+    context = " ".join(recent)
+    return f"{context} {question}".strip()[:1200]
