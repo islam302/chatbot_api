@@ -288,6 +288,46 @@ private/internal URLs (**`400`**).
 
 ---
 
+## 5c. Guided question tree — `/guided-tree/` + `/tree-languages/`
+A tappable tree of questions for a guided chatbot: pick a language → show root
+questions → tap one → show its answer and/or child questions to drill into.
+**Multilingual with one canonical language** (default Arabic): you author only the
+canonical tree; every other active language is generated automatically as a
+**positional mirror** (translated in the background). All scoped to the tenant.
+
+**Read the tree (public, any authenticated tenant, cached ~5 min):**
+```
+GET /guided-tree/?language=en        # omit language → canonical
+→ { "language": "en", "canonical_language": "ar",
+    "tree": [ { "id", "title", "answer", "order", "language",
+                "children": [ …same shape recursively… ] } ] }
+```
+Tap a node = descend into its `children`; show `answer` if present.
+
+**Languages:**
+```
+GET  /tree-languages/            → [ { id, code, name, is_active } ]   (?active=1 to filter)
+GET  /tree-languages/?active=1
+POST /tree-languages/            { "code": "en", "name": "English" }   (admin) → generates the mirror
+DELETE /tree-languages/{code}/                                         (admin; NOT the canonical one → 400)
+```
+
+**Authoring (writes always hit the canonical language; mirrors follow async):**
+```
+POST   /guided-tree/             { "title", "answer"?, "parent"? (id), "order"?, "is_active"? }
+PATCH  /guided-tree/{id}/        { "title"?, "answer"?, "order"?, "is_active"? }   (edit via ANY language node → resolves to canonical)
+DELETE /guided-tree/{id}/                                              (removes every language mirror too)
+GET    /guided-tree/flat/?language=ar                                  (flat dump for an admin editor)
+POST   /guided-tree/retranslate/ { "language"? }                       (rebuild one/all mirror languages) → 202
+```
+
+Notes:
+- `order` must be **unique among siblings** — omit it to auto-append; a clash returns **`400`**.
+- Edits/additions **don't block** on translation; re-fetch the mirror tree a moment later.
+- Deleting or reordering refreshes the affected languages automatically.
+
+---
+
 ## 6. Bot configuration (optional) — `GET` / `PATCH /chatbot-config/`
 The bot works with **zero config** (it infers identity from the uploaded data).
 Use this only to customise its presentation.

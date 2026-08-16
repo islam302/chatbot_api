@@ -314,3 +314,72 @@ class UnansweredQuestion(TimestampedModel):
 
     def __str__(self):
         return f"Unanswered({self.user_id} x{self.occurrences}: {self.question[:40]})"
+
+
+class AvailableLanguage(TimestampedModel):
+    """A language the guided question tree can be presented in.
+
+    The canonical language (settings.GUIDED_TREE_CANONICAL_LANGUAGE) is where all
+    edits happen; every other active language is a generated mirror of it.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    code = models.CharField(max_length=10, unique=True, help_text="e.g. 'ar', 'en'")
+    name = models.CharField(max_length=64, help_text="Display name, e.g. 'العربية'")
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+
+class QuestionTreeNode(TimestampedModel):
+    """A node in a tenant's guided question tree.
+
+    Tap a node → get its ``answer`` and/or its child questions to drill into.
+    The tree exists once per language: the canonical language is authored, and
+    every other language is a MIRROR matched **by position** (same ``order`` under
+    the matching parent), never by foreign key. ``order`` must be unique among a
+    node's active siblings (per owner + language) or positional matching breaks —
+    enforced in the write path (services.guided_tree).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="question_tree_nodes",
+    )
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="children",
+    )
+    title = models.CharField(max_length=500)
+    answer = models.TextField(null=True, blank=True)
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    language = models.CharField(max_length=10, default="ar", db_index=True)
+
+    class Meta:
+        ordering = ["order", "created_at"]
+        indexes = [
+            models.Index(fields=["owner", "language", "parent"]),
+            models.Index(fields=["owner", "language", "is_active"]),
+        ]
+
+    def __str__(self):
+        return f"[{self.language}] {self.title[:50]}"
+
+    def is_root(self) -> bool:
+        return self.parent_id is None
+
+    def has_children(self) -> bool:
+        return self.children.filter(is_active=True).exists()
+
+    def get_children(self):
+        return self.children.filter(is_active=True).order_by("order", "created_at")

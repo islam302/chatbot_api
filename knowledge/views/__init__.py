@@ -3,6 +3,7 @@ from .api_content import SyncAPIContentView
 from .chat import ChatAPIView, ChatFeedbackAPIView
 from .chatbot import ChatbotConfigView
 from .documents import UploadedDocumentViewSet
+from .guided_tree import AvailableLanguageViewSet, GuidedTreeViewSet
 from .unanswered import UnansweredQuestionViewSet
 from .web_crawl import CrawlWebsiteView
 
@@ -15,4 +16,6 @@ __all__ = [
     "CrawlWebsiteView",
     "UsageAnalyticsView",
     "UnansweredQuestionViewSet",
+    "GuidedTreeViewSet",
+    "AvailableLanguageViewSet",
 ]

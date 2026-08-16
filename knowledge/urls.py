@@ -2,10 +2,12 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    AvailableLanguageViewSet,
     ChatAPIView,
     ChatbotConfigView,
     ChatFeedbackAPIView,
     CrawlWebsiteView,
+    GuidedTreeViewSet,
     SyncAPIContentView,
     UnansweredQuestionViewSet,
     UploadedDocumentViewSet,
@@ -15,6 +17,8 @@ from .views import (
 router = DefaultRouter()
 router.register("documents", UploadedDocumentViewSet, basename="document")
 router.register("unanswered", UnansweredQuestionViewSet, basename="unanswered")
+router.register("guided-tree", GuidedTreeViewSet, basename="guided-tree")
+router.register("tree-languages", AvailableLanguageViewSet, basename="tree-language")
 
 urlpatterns = [
     path("chat/", ChatAPIView.as_view(), name="chat"),

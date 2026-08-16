@@ -575,6 +575,148 @@
       ]
     },
     {
+      "name": "Guided Question Tree",
+      "description": "Multilingual tappable question tree. One canonical language (default Arabic) is authored; other active languages are generated positional mirrors (translated in the background). Scoped to the tenant.",
+      "item": [
+        {
+          "name": "Get tree (by language, cached)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/guided-tree/?language=ar",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "guided-tree", ""],
+              "query": [{ "key": "language", "value": "ar", "description": "Omit for canonical" }]
+            },
+            "description": "Nested tree for a language (cached ~5 min). Returns { language, canonical_language, tree:[{id,title,answer,order,language,children[]}] }."
+          }
+        },
+        {
+          "name": "Create node (canonical)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"ما هي خدماتكم؟\",\n  \"answer\": \"نقدم خدمات إعلامية\",\n  \"parent\": null,\n  \"order\": 0,\n  \"is_active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/guided-tree/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "guided-tree", ""]
+            },
+            "description": "Add a node. Always applied to the canonical language; mirrors regenerate in the background. `order` must be unique among siblings (omit to auto-append; clash → 400). `parent` is a node id or null for a root."
+          }
+        },
+        {
+          "name": "Edit node",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"نص محدّث\",\n  \"answer\": \"إجابة محدّثة\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/guided-tree/{{tree_node_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "guided-tree", "{{tree_node_id}}", ""]
+            },
+            "description": "Edit a node (send any subset of title/answer/order/is_active). Editing a MIRROR node resolves to canonical automatically; the subtree re-translates in the background."
+          }
+        },
+        {
+          "name": "Delete node",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/guided-tree/{{tree_node_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "guided-tree", "{{tree_node_id}}", ""]
+            },
+            "description": "Delete a node and its subtree in EVERY language (resolves to canonical first)."
+          }
+        },
+        {
+          "name": "Flat dump (admin editor)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/guided-tree/flat/?language=ar",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "guided-tree", "flat", ""],
+              "query": [{ "key": "language", "value": "ar" }]
+            },
+            "description": "Flat list of every node in a language (parent id + order), for building an admin editor."
+          }
+        },
+        {
+          "name": "Retranslate mirrors",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language\": \"en\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/guided-tree/retranslate/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "guided-tree", "retranslate", ""]
+            },
+            "description": "Rebuild one mirror language (or all, if `language` omitted) from the canonical tree. Returns 202; runs in the background."
+          }
+        },
+        {
+          "name": "List tree languages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/tree-languages/?active=1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "tree-languages", ""],
+              "query": [{ "key": "active", "value": "1", "description": "Only active", "disabled": true }]
+            },
+            "description": "Languages the tree is offered in: [{ id, code, name, is_active }]."
+          }
+        },
+        {
+          "name": "Add language (admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"en\",\n  \"name\": \"English\",\n  \"is_active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/tree-languages/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "tree-languages", ""]
+            },
+            "description": "Admin only. Adds a language and generates its mirror of the caller's canonical tree in the background. Adding the canonical language returns 400."
+          }
+        },
+        {
+          "name": "Remove language (admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/tree-languages/en/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "tree-languages", "en", ""]
+            },
+            "description": "Admin only. Removes a language and its mirror nodes. The canonical language cannot be removed (400)."
+          }
+        }
+      ]
+    },
+    {
       "name": "Chatbot Config",
       "item": [
         {

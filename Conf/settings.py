@@ -288,6 +288,16 @@ RAG_VECTOR_BACKEND = os.getenv("RAG_VECTOR_BACKEND", "numpy").lower()
 # Max conversation turns kept in a chat `history` (1 turn = user + assistant).
 CHAT_MAX_HISTORY_TURNS = int(os.getenv("CHAT_MAX_HISTORY_TURNS", "10"))
 
+# --- Guided question tree ----------------------------------------------------
+# The canonical language: the ONE language authored by hand; every other active
+# language is a generated positional mirror of it. Never deletable.
+GUIDED_TREE_CANONICAL_LANGUAGE = os.getenv("GUIDED_TREE_CANONICAL_LANGUAGE", "ar")
+# Seconds to cache each language's rendered tree JSON (0 disables caching).
+GUIDED_TREE_CACHE_TTL = int(os.getenv("GUIDED_TREE_CACHE_TTL", "300"))
+# Run translation on write in a background thread (like INGESTION_MODE "thread").
+# "thread" = don't block the write; "sync" = inline (deterministic for tests).
+GUIDED_TREE_TRANSLATE_MODE = os.getenv("GUIDED_TREE_TRANSLATE_MODE", "thread").lower()
+
 # --- Multi-tenancy: per-tenant default quotas --------------------------------
 # A "tenant" is a User. These are the DEFAULTS; any tenant can be given its own
 # limits via a TenantQuota row (null fields on that row fall back to these).
