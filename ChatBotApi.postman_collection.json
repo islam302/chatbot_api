@@ -1213,6 +1213,62 @@
             },
             "description": "The caller's own subscription + live usage + credit balance for the current period (any authenticated user). Response includes a `credits` block: { balance, credits_per_question, exempt, questions_left }. Admin/staff have exempt: true (usage is free testing, questions_left is null)."
           }
+        },
+        {
+          "name": "Feature catalog",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/feature-catalog/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "feature-catalog", ""]
+            },
+            "description": "List of controllable features [{ key, label, description }] — api_sync, website_crawl, api_key, guided_tree, whatsapp. Use it to render the dashboard toggles. Any authenticated user."
+          }
+        },
+        {
+          "name": "My features",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/my-features/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "my-features", ""]
+            },
+            "description": "The caller's own resolved features: { features: { api_sync: { enabled, source, label }, ... } }. source = staff | override | default. Use it to show/hide UI on the frontend."
+          }
+        },
+        {
+          "name": "Get a user's features (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/user-features/{{user_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "user-features", "{{user_id}}", ""]
+            },
+            "description": "Admin only. A user's resolved features plus their raw overrides."
+          }
+        },
+        {
+          "name": "Set a user's features (admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"overrides\": {\n    \"api_sync\": true,\n    \"website_crawl\": true,\n    \"api_key\": false,\n    \"guided_tree\": null\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/user-features/{{user_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "user-features", "{{user_id}}", ""]
+            },
+            "description": "Admin only. Turn features on/off for a specific tenant. true/false force it; null clears the override (inherit the plan/tier default). Unknown keys ignored. A disabled feature's endpoint returns 402. Staff always have every feature regardless."
+          }
         }
       ]
     },

@@ -121,6 +121,17 @@ class WhatsAppSendView(APIView):
         responses={200: WhatsAppSendResponseSerializer},
     )
     def post(self, request):
+        try:
+            from subscriptions.features import has_feature
+
+            allowed = has_feature(request.user, "whatsapp")
+        except Exception:
+            allowed = True  # fail open on a billing-layer hiccup
+        if not allowed:
+            return Response(
+                {"detail": "WhatsApp sending isn't enabled for your account."},
+                status=status.HTTP_402_PAYMENT_REQUIRED,
+            )
         serializer = WhatsAppSendSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         client = MetaWhatsAppClient()

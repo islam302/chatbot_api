@@ -128,7 +128,7 @@ class CrawlEndpointTests(APITestCase):
             uploaded_by=_user, filename="Website: ex.com",
             source_type=SourceType.WEBSITE, processing_status=DocumentStatus.PROCESSING,
         )
-        with mock.patch("subscriptions.services.can_sync_api_content", side_effect=RuntimeError), \
+        with mock.patch("subscriptions.features.has_feature", side_effect=RuntimeError), \
              mock.patch.object(web_crawl_view, "validate_public_url", lambda u: u), \
              mock.patch.object(web_crawl_view, "dispatch_site_crawl", return_value=doc):
             res = self.client.post(self.url, {"url": "https://ex.com"}, format="json", HTTP_X_API_KEY=key)

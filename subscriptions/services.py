@@ -258,15 +258,13 @@ def resolve_model(user):
 def can_sync_api_content(user) -> bool:
     """May this tenant import knowledge from an external API (sync-api-content)?
 
-    Staff/admin: always. Paid plan: per the plan's ``allow_api_sync``. Free tier
-    (no active plan): per ``settings.FREE_TIER_ALLOW_API_SYNC`` (off by default).
+    Delegates to the feature system so a per-user admin override applies. Default
+    (no override): staff always; paid plan per ``allow_api_sync``; free tier per
+    ``settings.FREE_TIER_ALLOW_API_SYNC``.
     """
-    if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
-        return True
-    plan = active_plan(user)
-    if plan is not None:
-        return plan.allow_api_sync
-    return bool(getattr(settings, "FREE_TIER_ALLOW_API_SYNC", False))
+    from .features import has_feature
+
+    return has_feature(user, "api_sync")
 
 
 def plan_limits(user):

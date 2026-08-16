@@ -125,6 +125,82 @@ class PaddleWebhookView(APIView):
         return Response({"status": result})
 
 
+class FeatureCatalogView(APIView):
+    """The list of controllable features (keys + labels) for the dashboard UI."""
+
+    authentication_classes = AUTH
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses={200: dict})
+    def get(self, request):
+        from .features import catalog
+
+        return Response({"features": catalog()})
+
+
+class MyFeaturesView(APIView):
+    """The caller's own resolved features (so the frontend shows/hides UI)."""
+
+    authentication_classes = AUTH
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses={200: dict})
+    def get(self, request):
+        from .features import resolved_features
+
+        return Response({"features": resolved_features(request.user)})
+
+
+class UserFeaturesView(APIView):
+    """Admin: read or set which features a specific user has.
+
+    ``PATCH`` body: ``{"overrides": {"api_sync": true, "website_crawl": false,
+    "api_key": null}}`` — ``true``/``false`` force it, ``null`` clears the
+    override (inherit the plan/tier default). Unknown keys are ignored.
+    """
+
+    authentication_classes = AUTH
+    permission_classes = [permissions.IsAdminUser]
+
+    def _user(self, user_id):
+        from django.contrib.auth import get_user_model
+
+        return get_user_model().objects.filter(pk=user_id).first()
+
+    @extend_schema(responses={200: dict})
+    def get(self, request, user_id):
+        user = self._user(user_id)
+        if user is None:
+            return Response({"detail": "Unknown user."}, status=status.HTTP_404_NOT_FOUND)
+        from .features import _overrides, resolved_features
+
+        return Response({
+            "user": str(user.pk),
+            "username": user.username,
+            "features": resolved_features(user),
+            "overrides": _overrides(user),
+        })
+
+    @extend_schema(request={"type": "object"}, responses={200: dict})
+    def patch(self, request, user_id):
+        user = self._user(user_id)
+        if user is None:
+            return Response({"detail": "Unknown user."}, status=status.HTTP_404_NOT_FOUND)
+        from .features import resolved_features, set_overrides
+
+        mapping = request.data.get("overrides")
+        if mapping is None:
+            mapping = request.data
+        if not isinstance(mapping, dict):
+            return Response({"detail": "overrides must be an object."}, status=status.HTTP_400_BAD_REQUEST)
+        stored = set_overrides(user, mapping)
+        return Response({
+            "user": str(user.pk),
+            "overrides": stored,
+            "features": resolved_features(user),
+        })
+
+
 class MySubscriptionView(APIView):
     """The caller's own subscription + live usage for the current period."""
 

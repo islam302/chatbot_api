@@ -149,3 +149,25 @@ class PaddleWebhookEvent(TimestampedModel):
 
     def __str__(self):
         return f"{self.event_type} {self.event_id}"
+
+
+class UserFeatureOverride(TimestampedModel):
+    """Per-user feature toggles set by an admin from the dashboard.
+
+    ``overrides`` maps a feature key (see ``subscriptions.features.FEATURES``) to
+    an explicit ``True``/``False``. A key that is ABSENT means "inherit the
+    default" (plan / tier based). An admin can thus grant a feature a plan
+    wouldn't normally include, or revoke one, for a specific tenant — without
+    changing their plan. Staff/superusers always have every feature regardless.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="feature_overrides",
+    )
+    overrides = models.JSONField(default=dict, blank=True)
+
+    def __str__(self):
+        return f"Features({self.user}): {self.overrides}"

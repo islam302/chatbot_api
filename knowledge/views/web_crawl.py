@@ -61,9 +61,9 @@ class CrawlWebsiteView(APIView):
         # Feature gate: crawling a website into knowledge is a paid-plan feature
         # (same gate as external-API sync).
         try:
-            from subscriptions.services import can_sync_api_content
+            from subscriptions.features import has_feature
 
-            allowed = can_sync_api_content(request.user)
+            allowed = has_feature(request.user, "website_crawl")
         except Exception:
             allowed = True  # fail open: never block on a billing-layer hiccup
         if not allowed:

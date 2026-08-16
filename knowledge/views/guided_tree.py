@@ -39,6 +39,21 @@ class GuidedTreeViewSet(ViewSet):
     def _owned(self, request, pk):
         return QuestionTreeNode.objects.filter(owner=request.user, pk=pk).first()
 
+    def _feature_blocked(self, request):
+        """None if allowed to author the tree, else a 402 Response."""
+        try:
+            from subscriptions.features import has_feature
+
+            allowed = has_feature(request.user, "guided_tree")
+        except Exception:
+            allowed = True  # fail open on a billing-layer hiccup
+        if allowed:
+            return None
+        return Response(
+            {"detail": "The guided question tree isn't enabled for your account."},
+            status=status.HTTP_402_PAYMENT_REQUIRED,
+        )
+
     # -- Reads ------------------------------------------------------------- #
     @extend_schema(
         parameters=[OpenApiParameter("language", str, description="Language code (default: canonical)")],
@@ -56,6 +71,9 @@ class GuidedTreeViewSet(ViewSet):
     @extend_schema(request=QuestionTreeNodeWriteSerializer, responses={201: QuestionTreeNodeSerializer})
     def create(self, request):
         """Add a node (applied to the canonical language; mirrors follow async)."""
+        blocked = self._feature_blocked(request)
+        if blocked is not None:
+            return blocked
         ser = QuestionTreeNodeWriteSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         data = ser.validated_data

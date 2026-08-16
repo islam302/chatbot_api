@@ -354,12 +354,12 @@ class UserViewSet(viewsets.ModelViewSet):
         free tenant gets 402 and never sees the key.
         """
         try:
-            from knowledge.services.quota import is_free_tier
+            from subscriptions.features import has_feature
 
-            free = is_free_tier(request.user)
+            allowed = has_feature(request.user, "api_key")
         except Exception:
-            free = not request.user.is_staff  # fail closed: never leak a key
-        if free:
+            allowed = bool(request.user.is_staff)  # fail closed: never leak a key
+        if not allowed:
             return Response(
                 {"detail": "API key access is available on paid plans. Upgrade to enable it."},
                 status=status.HTTP_402_PAYMENT_REQUIRED,

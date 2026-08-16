@@ -325,6 +325,10 @@ Notes:
 - `order` must be **unique among siblings** — omit it to auto-append; a clash returns **`400`**.
 - Edits/additions **don't block** on translation; re-fetch the mirror tree a moment later.
 - Deleting or reordering refreshes the affected languages automatically.
+- **Feature-gated.** Reading the tree is always allowed, but **authoring** it
+  (`POST`/`PATCH`/`DELETE /guided-tree/`, `retranslate`) returns **`402`** when the
+  `guided_tree` feature is off for the tenant (see §11). Check `/my-features/` to
+  show/hide the authoring UI.
 
 ---
 
@@ -614,6 +618,24 @@ Require an **admin** token. Highlights:
   "Admin/staff accounts cannot be deactivated") so an admin can't lock themselves
   out. (Recovery if it ever happens on the server: `python manage.py reactivate_admin`.)
 - `GET /api-keys/`, `POST /api-keys/{id}/revoke|activate|regenerate/` — key control.
+
+**Per-user feature control (admin) — turn features on/off for a specific tenant:**
+Features are gated capabilities (`api_sync`, `website_crawl`, `api_key`,
+`guided_tree`, `whatsapp`). Each resolves as: **staff → always on**, else an
+admin **override**, else the **plan/tier default**. So you can grant a free user a
+paid feature — or revoke one — without changing their plan.
+- `GET /feature-catalog/` — list of controllable features `[{ key, label, description }]`
+  (any authenticated user; use it to render the dashboard toggles).
+- `GET /my-features/` — the caller's own resolved features
+  `{ features: { api_sync: { enabled, source, label }, … } }` (`source` = `staff` | `override` | `default`).
+  Use it in the frontend to show/hide UI.
+- `GET /user-features/{user_id}/` — a user's resolved features **plus** their raw `overrides` (admin).
+- `PATCH /user-features/{user_id}/` — set overrides (admin):
+  ```json
+  { "overrides": { "api_sync": true, "website_crawl": true, "api_key": false, "guided_tree": null } }
+  ```
+  `true`/`false` force it; **`null` clears** the override (inherit the default). Unknown keys are ignored.
+  When a feature is off, its endpoint returns **`402`**.
 
 **Plans & billing (admin):**
 - `GET /plans/` — anyone authenticated can list active plans (for a pricing page).
