@@ -217,10 +217,26 @@ class CreditTests(APITestCase):
     def test_check_chat_allowed_passes_with_credits(self):
         quota.check_chat_allowed(self.user)  # 100 credits → fine, no raise
 
-    def test_assign_plan_grants_included_credits(self):
+    def test_assign_plan_resets_wallet_to_plan_credits(self):
+        # Assignment RELOADS the wallet to the plan's allotment (not 100 + 2000).
         plan = make_plan(slug="pro", included_credits=2000)
         services.assign_plan(self.user, plan)
-        self.assertEqual(services.credit_balance(self.user), 2100)  # 100 free + 2000
+        self.assertEqual(services.credit_balance(self.user), 2000)
+
+    def test_downgrade_resets_credits_down_to_new_plan(self):
+        big = make_plan(slug="big", included_credits=2000)
+        small = make_plan(slug="small", included_credits=200)
+        services.assign_plan(self.user, big)
+        services.add_credits(self.user, 500)  # user tops up: 2000 + 500 = 2500
+        self.assertEqual(services.credit_balance(self.user), 2500)
+        services.assign_plan(self.user, small)  # downgrade → reload to 200
+        self.assertEqual(services.credit_balance(self.user), 200)
+
+    def test_limits_only_plan_change_does_not_wipe_credits(self):
+        # A plan with no credit allotment leaves the balance untouched.
+        limits_plan = make_plan(slug="limitsonly", included_credits=0, max_documents=50)
+        services.assign_plan(self.user, limits_plan)
+        self.assertEqual(services.credit_balance(self.user), 100)  # unchanged free grant
 
     def test_admin_add_credits_endpoint(self):
         admin, admin_key = make_tenant("credit_admin", is_staff=True)

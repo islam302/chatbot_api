@@ -645,6 +645,12 @@ paid feature — or revoke one — without changing their plan.
   `max_total_mb`, `is_active`, `allow_api_sync` (+ `paddle_price_id`) — credits
   and the token cap are **auto-derived** from `questions`.
 - `POST /subscriptions/` — assign/move a user to a plan (`{ user, plan, duration_days }`).
+  **Moving a user to a plan reloads their credit balance to that plan's allotment**
+  (a downgrade shrinks it, an upgrade grows it) — it does not stack onto the old
+  balance. Storage/document limits and features also follow the new plan
+  immediately (they're read live from the plan). A plan with no credit allotment
+  (`included_credits: 0`) leaves the existing balance untouched. Buying credits via
+  Paddle still **adds** to the balance (a purchase, not a plan change).
 - `POST /subscriptions/add-credits/` — top up a wallet (`{ user, amount }`).
 - `GET /subscriptions/` — list all subscriptions.
 - `POST /billing/paddle/webhook/` — **Paddle calls this, not you** (see §7). Public,

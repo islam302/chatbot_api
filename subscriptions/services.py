@@ -50,9 +50,13 @@ def assign_plan(user, plan, *, duration_days=30, auto_renew=True):
             "auto_renew": auto_renew,
         },
     )
-    # Grant the plan's credit allotment on assignment/renewal.
+    # Reload the wallet to the plan's allotment on assignment/change: moving a
+    # user between plans RESETS their balance to the new plan's credits (a
+    # downgrade shrinks it, an upgrade grows it) rather than stacking. A plan
+    # that defines no credits (included_credits == 0) leaves the balance alone,
+    # so we never silently wipe a wallet on a limits-only plan change.
     if plan.included_credits:
-        add_credits(user, plan.included_credits)
+        set_credits(user, plan.included_credits)
     return sub
 
 
@@ -126,12 +130,25 @@ def has_credits_for_question(user) -> bool:
 
 
 def add_credits(user, amount: int) -> int:
-    """Add ``amount`` credits (top-up / plan grant). Returns the new balance."""
+    """Add ``amount`` credits (top-up / purchase). Returns the new balance."""
     amount = max(0, int(amount or 0))
     wallet = get_wallet(user)
     if amount:
         CreditWallet.objects.filter(pk=wallet.pk).update(balance=F("balance") + amount)
         wallet.refresh_from_db(fields=["balance"])
+    return wallet.balance
+
+
+def set_credits(user, amount: int) -> int:
+    """Reset the wallet balance to exactly ``amount``. Returns the new balance.
+
+    Used when an admin moves a user between plans: the balance is reloaded to
+    the new plan's allotment rather than accumulated (see ``assign_plan``).
+    """
+    amount = max(0, int(amount or 0))
+    wallet = get_wallet(user)
+    CreditWallet.objects.filter(pk=wallet.pk).update(balance=amount)
+    wallet.balance = amount
     return wallet.balance
 
 
